@@ -62,7 +62,7 @@ writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) =
 blocksToOpenXML :: WriterOptions -> [Block] -> Doc
 blocksToOpenXML opts = vcat . map (blockToOpenXML opts)
 
--- | Auxiliary function to convert Plain block to Para.
+-- | Auxiliary function to convert Plain block to Para. DO WE NEED THIS TODO?
 plainToPara :: Block -> Block
 plainToPara (Plain x) = Para x
 plainToPara x         = x
@@ -92,12 +92,13 @@ listItemToOpenXML opts item =
   inTagsIndented "listitem" $ blocksToOpenXML opts $ map plainToPara item
 -}
 
+pStyle :: [(String,String)] -> Doc
+pStyle = selfClosingTag "w:pStyle"
+
 -- | Convert a Pandoc block element to OpenXML.
 blockToOpenXML :: WriterOptions -> Block -> Doc
 blockToOpenXML _ Null = empty
 {-
-blockToOpenXML _ (Header _ _) = empty -- should not occur after hierarchicalize
-blockToOpenXML opts (Plain lst) = inlinesToOpenXML opts lst
 blockToOpenXML opts (Para [Image txt (src,_)]) =
   let capt = inlinesToOpenXML opts txt
   in  inTagsIndented "figure" $
@@ -107,11 +108,19 @@ blockToOpenXML opts (Para [Image txt (src,_)]) =
              (selfClosingTag "imagedata" [("fileref",src)])) $$
            inTagsSimple "textobject" (inTagsSimple "phrase" capt))
 -}
+blockToOpenXML opts (Header lev lst) =
+  inTagsIndented "w:p" $
+    (inTagsIndented "w:pPr" $ pStyle [("w:val","Heading" ++ show lev)]) $$
+    (inTagsIndented "w:r" $ inTagsIndented "w:t" $ inlinesToOpenXML opts lst)
+blockToOpenXML opts (Plain lst) =
+  inTagsIndented "w:r" $
+    inTagsIndented "w:t" $
+      inlinesToOpenXML opts lst
 blockToOpenXML opts (Para lst) =
-  inTagsIndented "w:p"
-  $ inTagsIndented "w:r"
-    $ inTagsIndented "w:t"
-      $ inlinesToOpenXML opts lst
+  inTagsIndented "w:p" $
+    inTagsIndented "w:r" $
+      inTagsIndented "w:t" $
+        inlinesToOpenXML opts lst
 {-
 blockToOpenXML opts (BlockQuote blocks) =
   inTagsIndented "blockquote" $ blocksToOpenXML opts blocks
