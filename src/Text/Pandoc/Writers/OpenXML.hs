@@ -1,0 +1,251 @@
+{-
+Copyright (C) 2011 John MacFarlane <jgm@berkeley.edu>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+-}
+
+{- |
+   Module      : Text.Pandoc.Writers.OpenXML
+   Copyright   : Copyright (C) 2011 John MacFarlane
+   License     : GNU GPL, version 2 or above
+
+   Maintainer  : John MacFarlane <jgm@berkeley.edu>
+   Stability   : alpha
+   Portability : portable
+
+Conversion of 'Pandoc' documents to Office Open XML.
+-}
+module Text.Pandoc.Writers.OpenXML ( writeOpenXML) where
+import Text.Pandoc.Definition
+import Text.Pandoc.XML
+import Text.Pandoc.Shared
+import Text.Pandoc.Templates (renderTemplate)
+import Text.Pandoc.Readers.TeXMath
+import Data.List ( isPrefixOf, intercalate, isSuffixOf )
+import Data.Char ( toLower )
+import Text.Pandoc.Highlighting ( languages, languagesByExtension )
+import Text.Pandoc.Pretty
+
+-- | Convert Pandoc document to string in OpenXML format.
+writeOpenXML :: WriterOptions -> Pandoc -> String
+writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) =
+  let title = empty -- inlinesToOpenXML opts tit
+      authors = [] -- map (authorToOpenXML opts) auths
+      date = empty -- inlinesToOpenXML opts dat
+      colwidth = if writerWrapText opts
+                    then Just $ writerColumns opts
+                    else Nothing
+      render' = render colwidth
+      main     = render' $ blocksToOpenXML opts blocks
+      context = writerVariables opts ++
+                [ ("body", main)
+                , ("title", render' title)
+                , ("date", render' date) ] ++
+                [ ("author", render' a) | a <- authors ]
+  in  if writerStandalone opts
+         then renderTemplate context $ writerTemplate opts
+         else main
+
+-- | Convert a list of Pandoc blocks to OpenXML.
+blocksToOpenXML :: WriterOptions -> [Block] -> Doc
+blocksToOpenXML opts = vcat . map (blockToOpenXML opts)
+
+-- | Auxiliary function to convert Plain block to Para.
+plainToPara :: Block -> Block
+plainToPara (Plain x) = Para x
+plainToPara x         = x
+
+{-
+-- | Convert a list of pairs of terms and definitions into a list of
+-- OpenXML varlistentrys.
+deflistItemsToOpenXML :: WriterOptions -> [([Inline],[[Block]])] -> Doc
+deflistItemsToOpenXML opts items =
+  vcat $ map (\(term, defs) -> deflistItemToOpenXML opts term defs) items
+
+-- | Convert a term and a list of blocks into a OpenXML varlistentry.
+deflistItemToOpenXML :: WriterOptions -> [Inline] -> [[Block]] -> Doc
+deflistItemToOpenXML opts term defs =
+  let def' = concatMap (map plainToPara) defs
+  in  inTagsIndented "varlistentry" $
+      inTagsIndented "term" (inlinesToOpenXML opts term) $$
+      inTagsIndented "listitem" (blocksToOpenXML opts def')
+
+-- | Convert a list of lists of blocks to a list of OpenXML list items.
+listItemsToOpenXML :: WriterOptions -> [[Block]] -> Doc
+listItemsToOpenXML opts items = vcat $ map (listItemToOpenXML opts) items
+
+-- | Convert a list of blocks into a OpenXML list item.
+listItemToOpenXML :: WriterOptions -> [Block] -> Doc
+listItemToOpenXML opts item =
+  inTagsIndented "listitem" $ blocksToOpenXML opts $ map plainToPara item
+-}
+
+-- | Convert a Pandoc block element to OpenXML.
+blockToOpenXML :: WriterOptions -> Block -> Doc
+blockToOpenXML _ Null = empty
+{-
+blockToOpenXML _ (Header _ _) = empty -- should not occur after hierarchicalize
+blockToOpenXML opts (Plain lst) = inlinesToOpenXML opts lst
+blockToOpenXML opts (Para [Image txt (src,_)]) =
+  let capt = inlinesToOpenXML opts txt
+  in  inTagsIndented "figure" $
+        inTagsSimple "title" capt $$
+        (inTagsIndented "mediaobject" $
+           (inTagsIndented "imageobject"
+             (selfClosingTag "imagedata" [("fileref",src)])) $$
+           inTagsSimple "textobject" (inTagsSimple "phrase" capt))
+-}
+blockToOpenXML opts (Para lst) =
+  inTagsIndented "w:p"
+  $ inTagsIndented "w:r"
+    $ inTagsIndented "w:t"
+      $ inlinesToOpenXML opts lst
+{-
+blockToOpenXML opts (BlockQuote blocks) =
+  inTagsIndented "blockquote" $ blocksToOpenXML opts blocks
+blockToOpenXML _ (CodeBlock (_,classes,_) str) =
+  text ("<programlisting" ++ lang ++ ">") <> cr <>
+     flush (text (escapeStringForXML str) <> cr <> text "</programlisting>")
+    where lang  = if null langs
+                     then ""
+                     else " language=\"" ++ escapeStringForXML (head langs) ++
+                          "\""
+          isLang l    = map toLower l `elem` map (map toLower) languages
+          langsFrom s = if isLang s
+                           then [s]
+                           else languagesByExtension . map toLower $ s
+          langs       = concatMap langsFrom classes
+blockToOpenXML opts (BulletList lst) =
+  inTagsIndented "itemizedlist" $ listItemsToOpenXML opts lst
+blockToOpenXML _ (OrderedList _ []) = empty
+blockToOpenXML opts (OrderedList (start, numstyle, _) (first:rest)) =
+  let attribs  = case numstyle of
+                       DefaultStyle -> []
+                       Decimal      -> [("numeration", "arabic")]
+                       Example      -> [("numeration", "arabic")]
+                       UpperAlpha   -> [("numeration", "upperalpha")]
+                       LowerAlpha   -> [("numeration", "loweralpha")]
+                       UpperRoman   -> [("numeration", "upperroman")]
+                       LowerRoman   -> [("numeration", "lowerroman")]
+      items    = if start == 1
+                    then listItemsToOpenXML opts (first:rest)
+                    else (inTags True "listitem" [("override",show start)]
+                         (blocksToOpenXML opts $ map plainToPara first)) $$
+                         listItemsToOpenXML opts rest
+  in  inTags True "orderedlist" attribs items
+blockToOpenXML opts (DefinitionList lst) =
+  inTagsIndented "variablelist" $ deflistItemsToOpenXML opts lst
+blockToOpenXML _ (RawBlock "docbook" str) = text str -- raw XML block
+-- we allow html for compatibility with earlier versions of pandoc
+blockToOpenXML _ (RawBlock "html" str) = text str -- raw XML block
+blockToOpenXML _ (RawBlock _ _) = empty
+blockToOpenXML _ HorizontalRule = empty -- not semantic
+blockToOpenXML opts (Table caption aligns widths headers rows) =
+  let captionDoc   = if null caption
+                        then empty
+                        else inTagsIndented "title"
+                              (inlinesToOpenXML opts caption)
+      tableType    = if isEmpty captionDoc then "informaltable" else "table"
+      percent w    = show (truncate (100*w) :: Integer) ++ "*"
+      coltags = vcat $ zipWith (\w al -> selfClosingTag "colspec"
+                       ([("colwidth", percent w) | w > 0] ++
+                        [("align", alignmentToString al)])) widths aligns
+      head' = if all null headers
+                 then empty
+                 else inTagsIndented "thead" $
+                         tableRowToOpenXML opts headers
+      body' = inTagsIndented "tbody" $
+              vcat $ map (tableRowToOpenXML opts) rows
+  in  inTagsIndented tableType $ captionDoc $$
+        (inTags True "tgroup" [("cols", show (length headers))] $
+         coltags $$ head' $$ body')
+-}
+{-
+alignmentToString :: Alignment -> [Char]
+alignmentToString alignment = case alignment of
+                                 AlignLeft -> "left"
+                                 AlignRight -> "right"
+                                 AlignCenter -> "center"
+                                 AlignDefault -> "left"
+
+tableRowToOpenXML :: WriterOptions
+                  -> [[Block]]
+                  -> Doc
+tableRowToOpenXML opts cols =
+  inTagsIndented "row" $ vcat $ map (tableItemToOpenXML opts) cols
+
+tableItemToOpenXML :: WriterOptions
+                   -> [Block]
+                   -> Doc
+tableItemToOpenXML opts item =
+  inTags True "entry" [] $ vcat $ map (blockToOpenXML opts) item
+-}
+
+-- | Convert a list of inline elements to OpenXML.
+inlinesToOpenXML :: WriterOptions -> [Inline] -> Doc
+inlinesToOpenXML opts lst = hcat $ map (inlineToOpenXML opts) lst
+
+-- | Convert an inline element to OpenXML.
+inlineToOpenXML :: WriterOptions -> Inline -> Doc
+inlineToOpenXML _ (Str str) = text $ escapeStringForXML str
+inlineToOpenXML _ Space = space
+{-
+inlineToOpenXML opts (Emph lst) =
+  inTagsSimple "emphasis" $ inlinesToOpenXML opts lst
+inlineToOpenXML opts (Strong lst) =
+  inTags False "emphasis" [("role", "strong")] $ inlinesToOpenXML opts lst
+inlineToOpenXML opts (Strikeout lst) =
+  inTags False "emphasis" [("role", "strikethrough")] $
+  inlinesToOpenXML opts lst
+inlineToOpenXML opts (Superscript lst) =
+  inTagsSimple "superscript" $ inlinesToOpenXML opts lst
+inlineToOpenXML opts (Subscript lst) =
+  inTagsSimple "subscript" $ inlinesToOpenXML opts lst
+inlineToOpenXML opts (SmallCaps lst) =
+  inTags False "emphasis" [("role", "smallcaps")] $
+  inlinesToOpenXML opts lst
+inlineToOpenXML opts (Quoted _ lst) =
+  inTagsSimple "quote" $ inlinesToOpenXML opts lst
+inlineToOpenXML opts (Cite _ lst) =
+  inlinesToOpenXML opts lst
+inlineToOpenXML _ (Code _ str) =
+  inTagsSimple "literal" $ text (escapeStringForXML str)
+inlineToOpenXML opts (Math _ str) = inlinesToOpenXML opts $ readTeXMath str
+inlineToOpenXML _ (RawInline f x) | f == "html" || f == "docbook" = text x
+                                  | otherwise                     = empty
+inlineToOpenXML _ LineBreak = inTagsSimple "literallayout" empty
+inlineToOpenXML opts (Link txt (src, _)) =
+  if isPrefixOf "mailto:" src
+     then let src' = drop 7 src
+              emailLink = inTagsSimple "email" $ text $
+                          escapeStringForXML $ src'
+          in  case txt of
+               [Code _ s] | s == src' -> emailLink
+               _             -> inlinesToOpenXML opts txt <+>
+                                  char '(' <> emailLink <> char ')'
+     else (if isPrefixOf "#" src
+              then inTags False "link" [("linkend", drop 1 src)]
+              else inTags False "ulink" [("url", src)]) $
+          inlinesToOpenXML opts txt
+inlineToOpenXML _ (Image _ (src, tit)) =
+  let titleDoc = if null tit
+                   then empty
+                   else inTagsIndented "objectinfo" $
+                        inTagsIndented "title" (text $ escapeStringForXML tit)
+  in  inTagsIndented "inlinemediaobject" $ inTagsIndented "imageobject" $
+      titleDoc $$ selfClosingTag "imagedata" [("fileref", src)]
+inlineToOpenXML opts (Note contents) =
+  inTagsIndented "footnote" $ blocksToOpenXML opts contents
+-}
