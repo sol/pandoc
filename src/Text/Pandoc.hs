@@ -95,6 +95,7 @@ module Text.Pandoc
                , writeTextile
                , writeRTF
                , writeODT
+               , writeDocx
                , writeEPUB
                , writeOrg
                , writeAsciiDoc
@@ -129,6 +130,7 @@ import Text.Pandoc.Writers.ConTeXt
 import Text.Pandoc.Writers.Texinfo
 import Text.Pandoc.Writers.HTML
 import Text.Pandoc.Writers.ODT
+import Text.Pandoc.Writers.Docx
 import Text.Pandoc.Writers.EPUB
 import Text.Pandoc.Writers.Docbook
 import Text.Pandoc.Writers.OpenDocument
@@ -168,7 +170,7 @@ readers = [("native"       , \_ -> readNative)
           ]
 
 -- | Association list of formats and writers (omitting the
--- binary writers, odt and epub).
+-- binary writers, odt, docx, and epub).
 writers :: [ ( String, WriterOptions -> Pandoc -> String ) ]
 writers = [("native"       , writeNative)
           ,("json"         , \_ -> encodeJSON)
