@@ -51,6 +51,8 @@ Data-Files:
                  templates/epub-coverimage.html,
                  -- data for ODT writer
                  reference.odt,
+                 -- data for docx writer
+                 reference.docx,
                  -- stylesheet for EPUB writer
                  epub.css,
                  -- data for LaTeXMathML writer
