@@ -30,6 +30,7 @@ Conversion of 'Pandoc' documents to Office Open XML.
 module Text.Pandoc.Writers.OpenXML ( writeOpenXML) where
 import Text.Pandoc.Definition
 import Text.Pandoc.XML
+import Text.Pandoc.Generic
 import Text.Pandoc.Shared
 import Text.Pandoc.Templates (renderTemplate)
 import Text.Pandoc.Readers.TeXMath
@@ -37,6 +38,18 @@ import Data.List ( isPrefixOf, intercalate, isSuffixOf )
 import Data.Char ( toLower )
 import Text.Pandoc.Highlighting ( languages, languagesByExtension )
 import Text.Pandoc.Pretty
+import Control.Monad.State
+
+data WriterState = WriterState{
+       stTextProperties :: [Doc]
+       }
+
+defaultWriterState :: WriterState
+defaultWriterState = WriterState{
+      stTextProperties = []
+      }
+
+type WS = State WriterState
 
 -- | Convert Pandoc document to string in OpenXML format.
 writeOpenXML :: WriterOptions -> Pandoc -> String
@@ -48,7 +61,10 @@ writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) =
                     then Just $ writerColumns opts
                     else Nothing
       render' = render colwidth
-      main     = render' $ blocksToOpenXML opts blocks
+      convertSpace (Str x : Space : Str y : xs) = Str (x ++ " " ++ y) : xs
+      convertSpace xs = xs
+      blocks' = bottomUp convertSpace $ blocks
+      main     = render' $ evalState (blocksToOpenXML opts blocks') defaultWriterState
       context = writerVariables opts ++
                 [ ("body", main)
                 , ("title", render' title)
@@ -59,15 +75,15 @@ writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) =
          else main
 
 -- | Convert a list of Pandoc blocks to OpenXML.
-blocksToOpenXML :: WriterOptions -> [Block] -> Doc
-blocksToOpenXML opts = vcat . map (blockToOpenXML opts)
+blocksToOpenXML :: WriterOptions -> [Block] -> WS Doc
+blocksToOpenXML opts bls = vcat `fmap` mapM (blockToOpenXML opts) bls
 
+{-
 -- | Auxiliary function to convert Plain block to Para. DO WE NEED THIS TODO?
 plainToPara :: Block -> Block
 plainToPara (Plain x) = Para x
 plainToPara x         = x
 
-{-
 -- | Convert a list of pairs of terms and definitions into a list of
 -- OpenXML varlistentrys.
 deflistItemsToOpenXML :: WriterOptions -> [([Inline],[[Block]])] -> Doc
@@ -96,8 +112,8 @@ pStyle :: [(String,String)] -> Doc
 pStyle = selfClosingTag "w:pStyle"
 
 -- | Convert a Pandoc block element to OpenXML.
-blockToOpenXML :: WriterOptions -> Block -> Doc
-blockToOpenXML _ Null = empty
+blockToOpenXML :: WriterOptions -> Block -> WS Doc
+blockToOpenXML _ Null = return empty
 {-
 blockToOpenXML opts (Para [Image txt (src,_)]) =
   let capt = inlinesToOpenXML opts txt
@@ -108,19 +124,13 @@ blockToOpenXML opts (Para [Image txt (src,_)]) =
              (selfClosingTag "imagedata" [("fileref",src)])) $$
            inTagsSimple "textobject" (inTagsSimple "phrase" capt))
 -}
-blockToOpenXML opts (Header lev lst) =
-  inTagsIndented "w:p" $
-    (inTagsIndented "w:pPr" $ pStyle [("w:val","Heading" ++ show lev)]) $$
-    (inTagsIndented "w:r" $ inTagsIndented "w:t" $ inlinesToOpenXML opts lst)
+blockToOpenXML opts (Header lev lst) = do
+  contents <- inlinesToOpenXML opts lst
+  return $ inTagsIndented "w:p"
+         $ (inTagsIndented "w:pPr" $ pStyle [("w:val","Heading" ++ show lev)]) $$ contents
 blockToOpenXML opts (Plain lst) =
-  inTagsIndented "w:r" $
-    inTagsIndented "w:t" $
-      inlinesToOpenXML opts lst
-blockToOpenXML opts (Para lst) =
-  inTagsIndented "w:p" $
-    inTagsIndented "w:r" $
-      inTagsIndented "w:t" $
-        inlinesToOpenXML opts lst
+  inlinesToOpenXML opts lst
+blockToOpenXML opts (Para lst) = inTagsIndented "w:p" `fmap` inlinesToOpenXML opts lst
 {-
 blockToOpenXML opts (BlockQuote blocks) =
   inTagsIndented "blockquote" $ blocksToOpenXML opts blocks
@@ -203,18 +213,46 @@ tableItemToOpenXML opts item =
 -}
 
 -- | Convert a list of inline elements to OpenXML.
-inlinesToOpenXML :: WriterOptions -> [Inline] -> Doc
-inlinesToOpenXML opts lst = hcat $ map (inlineToOpenXML opts) lst
+inlinesToOpenXML :: WriterOptions -> [Inline] -> WS Doc
+inlinesToOpenXML opts lst = hcat `fmap` mapM (inlineToOpenXML opts) lst
+
+getProps :: WS Doc
+getProps = do
+  props <- gets stTextProperties
+  return $ if null props
+              then empty
+              else inTagsIndented "w:rPr" $ vcat props
+
+pushProp :: Doc -> WS ()
+pushProp d = modify $ \s -> s{ stTextProperties = d : stTextProperties s }
+
+popProp :: WS ()
+popProp = modify $ \s -> s{ stTextProperties = drop 1 $ stTextProperties s }
+
+withProp :: Doc -> WS a -> WS a
+withProp d p = do
+  pushProp d
+  res <- p
+  popProp
+  return res
 
 -- | Convert an inline element to OpenXML.
-inlineToOpenXML :: WriterOptions -> Inline -> Doc
-inlineToOpenXML _ (Str str) = text $ escapeStringForXML str
-inlineToOpenXML _ Space = space
+inlineToOpenXML :: WriterOptions -> Inline -> WS Doc
+inlineToOpenXML _ (Str str) = do
+  props <- getProps
+  return $
+    inTagsIndented "w:r" $
+      props $$
+      inTags False "w:t" [("xml:space","preserve")]
+          (text $ escapeStringForXML str)
+inlineToOpenXML opts Space = inlineToOpenXML opts (Str " ")
+inlineToOpenXML opts (Strong lst) =
+  withProp (selfClosingTag "w:b" []) $ inlinesToOpenXML opts lst
+inlineToOpenXML opts (Emph lst) =
+  withProp (selfClosingTag "w:i" []) $ inlinesToOpenXML opts lst
 {-
 inlineToOpenXML opts (Emph lst) =
   inTagsSimple "emphasis" $ inlinesToOpenXML opts lst
-inlineToOpenXML opts (Strong lst) =
-  inTags False "emphasis" [("role", "strong")] $ inlinesToOpenXML opts lst
 inlineToOpenXML opts (Strikeout lst) =
   inTags False "emphasis" [("role", "strikethrough")] $
   inlinesToOpenXML opts lst
