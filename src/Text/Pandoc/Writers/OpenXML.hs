@@ -41,12 +41,16 @@ import Text.Pandoc.Pretty
 import Control.Monad.State
 
 data WriterState = WriterState{
-       stTextProperties :: [Doc]
+         stTextProperties :: [Doc]
+       , stParaProperties :: [Doc]
+       , stFootnotes      :: [Doc]
        }
 
 defaultWriterState :: WriterState
 defaultWriterState = WriterState{
-      stTextProperties = []
+        stTextProperties = []
+      , stParaProperties = []
+      , stFootnotes      = []
       }
 
 type WS = State WriterState
@@ -65,7 +69,9 @@ writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) =
       convertSpace (Str x : Str y : xs) = Str (x ++ y) : xs
       convertSpace xs = xs
       blocks' = bottomUp convertSpace $ blocks
-      main     = render' $ evalState (blocksToOpenXML opts blocks') defaultWriterState
+      (doc,st) = runState (blocksToOpenXML opts blocks') defaultWriterState
+      notes    = vcat $ reverse $ stFootnotes st
+      main     = render' $ doc $$ notes
       context = writerVariables opts ++
                 [ ("body", main)
                 , ("title", render' title)
@@ -135,6 +141,9 @@ blockToOpenXML opts (Header lev lst) = do
 blockToOpenXML opts (Plain lst) =
   inlinesToOpenXML opts lst
 blockToOpenXML opts (Para lst) = inTagsIndented "w:p" `fmap` inlinesToOpenXML opts lst
+blockToOpenXML _ (RawBlock format str)
+  | format = "openxml" = return $ text str -- raw XML block
+  | otherwise          = return empty
 {-
 blockToOpenXML opts (BlockQuote blocks) =
   inTagsIndented "blockquote" $ blocksToOpenXML opts blocks
@@ -170,10 +179,6 @@ blockToOpenXML opts (OrderedList (start, numstyle, _) (first:rest)) =
   in  inTags True "orderedlist" attribs items
 blockToOpenXML opts (DefinitionList lst) =
   inTagsIndented "variablelist" $ deflistItemsToOpenXML opts lst
-blockToOpenXML _ (RawBlock "docbook" str) = text str -- raw XML block
--- we allow html for compatibility with earlier versions of pandoc
-blockToOpenXML _ (RawBlock "html" str) = text str -- raw XML block
-blockToOpenXML _ (RawBlock _ _) = empty
 blockToOpenXML _ HorizontalRule = empty -- not semantic
 blockToOpenXML opts (Table caption aligns widths headers rows) =
   let captionDoc   = if null caption
@@ -220,30 +225,50 @@ tableItemToOpenXML opts item =
 inlinesToOpenXML :: WriterOptions -> [Inline] -> WS Doc
 inlinesToOpenXML opts lst = vcat `fmap` mapM (inlineToOpenXML opts) lst
 
-getProps :: WS Doc
-getProps = do
+getTextProps :: WS Doc
+getTextProps = do
   props <- gets stTextProperties
   return $ if null props
               then empty
               else inTagsIndented "w:rPr" $ vcat props
 
-pushProp :: Doc -> WS ()
-pushProp d = modify $ \s -> s{ stTextProperties = d : stTextProperties s }
+pushTextProp :: Doc -> WS ()
+pushTextProp d = modify $ \s -> s{ stTextProperties = d : stTextProperties s }
 
-popProp :: WS ()
-popProp = modify $ \s -> s{ stTextProperties = drop 1 $ stTextProperties s }
+popTextProp :: WS ()
+popTextProp = modify $ \s -> s{ stTextProperties = drop 1 $ stTextProperties s }
 
-withProp :: Doc -> WS a -> WS a
-withProp d p = do
-  pushProp d
+withTextProp :: Doc -> WS a -> WS a
+withTextProp d p = do
+  pushTextProp d
   res <- p
-  popProp
+  popTextProp
+  return res
+
+getParaProps :: WS Doc
+getParaProps = do
+  props <- gets stParaProperties
+  return $ if null props
+              then empty
+              else inTagsIndented "w:pPr" $ vcat props
+
+pushParaProp :: Doc -> WS ()
+pushParaProp d = modify $ \s -> s{ stParaProperties = d : stParaProperties s }
+
+popParaProp :: WS ()
+popParaProp = modify $ \s -> s{ stParaProperties = drop 1 $ stParaProperties s }
+
+withParaProp :: Doc -> WS a -> WS a
+withParaProp d p = do
+  pushParaProp d
+  res <- p
+  popParaProp
   return res
 
 -- | Convert an inline element to OpenXML.
 inlineToOpenXML :: WriterOptions -> Inline -> WS Doc
 inlineToOpenXML _ (Str str) = do
-  props <- getProps
+  props <- getTextProps
   return $
     inTagsIndented "w:r" $
       props $$
@@ -251,20 +276,20 @@ inlineToOpenXML _ (Str str) = do
           (text $ escapeStringForXML str)
 inlineToOpenXML opts Space = inlineToOpenXML opts (Str " ")
 inlineToOpenXML opts (Strong lst) =
-  withProp (selfClosingTag "w:b" []) $ inlinesToOpenXML opts lst
+  withTextProp (selfClosingTag "w:b" []) $ inlinesToOpenXML opts lst
 inlineToOpenXML opts (Emph lst) =
-  withProp (selfClosingTag "w:i" []) $ inlinesToOpenXML opts lst
+  withTextProp (selfClosingTag "w:i" []) $ inlinesToOpenXML opts lst
 inlineToOpenXML opts (Subscript lst) =
-  withProp (selfClosingTag "w:vertAlign" [("w:val","subscript")])
+  withTextProp (selfClosingTag "w:vertAlign" [("w:val","subscript")])
   $ inlinesToOpenXML opts lst
 inlineToOpenXML opts (Superscript lst) =
-  withProp (selfClosingTag "w:vertAlign" [("w:val","superscript")])
+  withTextProp (selfClosingTag "w:vertAlign" [("w:val","superscript")])
   $ inlinesToOpenXML opts lst
 inlineToOpenXML opts (SmallCaps lst) =
-  withProp (selfClosingTag "w:smallCaps" [])
+  withTextProp (selfClosingTag "w:smallCaps" [])
   $ inlinesToOpenXML opts lst
 inlineToOpenXML opts (Strikeout lst) =
-  withProp (selfClosingTag "w:strike" [])
+  withTextProp (selfClosingTag "w:strike" [])
   $ inlinesToOpenXML opts lst
 inlineToOpenXML _ LineBreak = return $ selfClosingTag "w:br" []
 inlineToOpenXML _ (RawInline f x) | f == "openxml" = return $ text x
@@ -282,6 +307,18 @@ inlineToOpenXML _ (Code _ str) =
       inTagsIndented "w:rPr" (rStyle "VerbatimChar") $$
       inTags False "w:t" [("xml:space","preserve")]
           (text $ escapeStringForXML str)
+inlineToOpenXML opts (Note bs) = do
+  notes <- gets stFootnotes
+  let notenum = length notes + 1
+  let noteref = inTagsIndented "w:r"
+                $  inTagsIndented "w:rPr" (rStyle "FootnoteReference")
+                $$ selfClosingTag "w:footnoteReference" [("w:id",show notenum)]
+  contents <- withParaProp (pStyle "FootnoteText") $ blocksToOpenXML opts bs
+  -- TODO need to add note ref inside first para.
+  -- maybe the note alos needs to go in a separate file???
+  let newnote = inTags True "w:footnote" [("w:id",show notenum)] contents
+  modify $ \s -> s{ stFootnotes = newnote : notes }
+  return noteref
 
 {-
 inlineToOpenXML opts (Link txt (src, _)) =
@@ -301,9 +338,7 @@ inlineToOpenXML _ (Image _ (src, tit)) =
   let titleDoc = if null tit
                    then empty
                    else inTagsIndented "objectinfo" $
-                        inTagsIndented "title" (text $ escapeStringForXML tit)
+
   in  inTagsIndented "inlinemediaobject" $ inTagsIndented "imageobject" $
       titleDoc $$ selfClosingTag "imagedata" [("fileref", src)]
-inlineToOpenXML opts (Note contents) =
-  inTagsIndented "footnote" $ blocksToOpenXML opts contents
 -}
