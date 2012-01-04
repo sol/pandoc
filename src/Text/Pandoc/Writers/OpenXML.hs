@@ -62,6 +62,7 @@ writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) =
                     else Nothing
       render' = render colwidth
       convertSpace (Str x : Space : Str y : xs) = Str (x ++ " " ++ y) : xs
+      convertSpace (Str x : Str y : xs) = Str (x ++ y) : xs
       convertSpace xs = xs
       blocks' = bottomUp convertSpace $ blocks
       main     = render' $ evalState (blocksToOpenXML opts blocks') defaultWriterState
@@ -108,8 +109,11 @@ listItemToOpenXML opts item =
   inTagsIndented "listitem" $ blocksToOpenXML opts $ map plainToPara item
 -}
 
-pStyle :: [(String,String)] -> Doc
-pStyle = selfClosingTag "w:pStyle"
+pStyle :: String -> Doc
+pStyle sty = selfClosingTag "w:pStyle" [("w:val",sty)]
+
+rStyle :: String -> Doc
+rStyle sty = selfClosingTag "w:rStyle" [("w:val",sty)]
 
 -- | Convert a Pandoc block element to OpenXML.
 blockToOpenXML :: WriterOptions -> Block -> WS Doc
@@ -127,7 +131,7 @@ blockToOpenXML opts (Para [Image txt (src,_)]) =
 blockToOpenXML opts (Header lev lst) = do
   contents <- inlinesToOpenXML opts lst
   return $ inTagsIndented "w:p"
-         $ (inTagsIndented "w:pPr" $ pStyle [("w:val","Heading" ++ show lev)]) $$ contents
+         $ (inTagsIndented "w:pPr" $ pStyle ("Heading" ++ show lev)) $$ contents
 blockToOpenXML opts (Plain lst) =
   inlinesToOpenXML opts lst
 blockToOpenXML opts (Para lst) = inTagsIndented "w:p" `fmap` inlinesToOpenXML opts lst
@@ -265,15 +269,21 @@ inlineToOpenXML opts (Strikeout lst) =
 inlineToOpenXML _ LineBreak = return $ selfClosingTag "w:br" []
 inlineToOpenXML _ (RawInline f x) | f == "openxml" = return $ text x
                                   | otherwise      = return empty
+inlineToOpenXML opts (Quoted quoteType lst) =
+  inlinesToOpenXML opts $ [Str open] ++ lst ++ [Str close]
+    where (open, close) = case quoteType of
+                            SingleQuote -> ("\x2018", "\x2019")
+                            DoubleQuote -> ("\x201C", "\x201D")
+inlineToOpenXML opts (Math _ str) = inlinesToOpenXML opts $ readTeXMath str
+inlineToOpenXML opts (Cite _ lst) = inlinesToOpenXML opts lst
+inlineToOpenXML _ (Code _ str) =
+  return $
+    inTagsIndented "w:r" $
+      inTagsIndented "w:rPr" (rStyle "VerbatimChar") $$
+      inTags False "w:t" [("xml:space","preserve")]
+          (text $ escapeStringForXML str)
 
 {-
-inlineToOpenXML opts (Quoted _ lst) =
-  inTagsSimple "quote" $ inlinesToOpenXML opts lst
-inlineToOpenXML opts (Cite _ lst) =
-  inlinesToOpenXML opts lst
-inlineToOpenXML _ (Code _ str) =
-  inTagsSimple "literal" $ text (escapeStringForXML str)
-inlineToOpenXML opts (Math _ str) = inlinesToOpenXML opts $ readTeXMath str
 inlineToOpenXML opts (Link txt (src, _)) =
   if isPrefixOf "mailto:" src
      then let src' = drop 7 src
