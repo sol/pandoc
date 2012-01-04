@@ -214,7 +214,7 @@ tableItemToOpenXML opts item =
 
 -- | Convert a list of inline elements to OpenXML.
 inlinesToOpenXML :: WriterOptions -> [Inline] -> WS Doc
-inlinesToOpenXML opts lst = hcat `fmap` mapM (inlineToOpenXML opts) lst
+inlinesToOpenXML opts lst = vcat `fmap` mapM (inlineToOpenXML opts) lst
 
 getProps :: WS Doc
 getProps = do
@@ -250,16 +250,16 @@ inlineToOpenXML opts (Strong lst) =
   withProp (selfClosingTag "w:b" []) $ inlinesToOpenXML opts lst
 inlineToOpenXML opts (Emph lst) =
   withProp (selfClosingTag "w:i" []) $ inlinesToOpenXML opts lst
+inlineToOpenXML opts (Subscript lst) =
+  withProp (selfClosingTag "w:vertAlign" [("w:val","subscript")])
+  $ inlinesToOpenXML opts lst
+inlineToOpenXML opts (Superscript lst) =
+  withProp (selfClosingTag "w:vertAlign" [("w:val","superscript")])
+  $ inlinesToOpenXML opts lst
 {-
-inlineToOpenXML opts (Emph lst) =
-  inTagsSimple "emphasis" $ inlinesToOpenXML opts lst
 inlineToOpenXML opts (Strikeout lst) =
   inTags False "emphasis" [("role", "strikethrough")] $
   inlinesToOpenXML opts lst
-inlineToOpenXML opts (Superscript lst) =
-  inTagsSimple "superscript" $ inlinesToOpenXML opts lst
-inlineToOpenXML opts (Subscript lst) =
-  inTagsSimple "subscript" $ inlinesToOpenXML opts lst
 inlineToOpenXML opts (SmallCaps lst) =
   inTags False "emphasis" [("role", "smallcaps")] $
   inlinesToOpenXML opts lst
