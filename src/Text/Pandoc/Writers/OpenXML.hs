@@ -142,8 +142,8 @@ blockToOpenXML opts (Plain lst) =
   inlinesToOpenXML opts lst
 blockToOpenXML opts (Para lst) = inTagsIndented "w:p" `fmap` inlinesToOpenXML opts lst
 blockToOpenXML _ (RawBlock format str)
-  | format = "openxml" = return $ text str -- raw XML block
-  | otherwise          = return empty
+  | format == "openxml" = return $ text str -- raw XML block
+  | otherwise           = return empty
 {-
 blockToOpenXML opts (BlockQuote blocks) =
   inTagsIndented "blockquote" $ blocksToOpenXML opts blocks
