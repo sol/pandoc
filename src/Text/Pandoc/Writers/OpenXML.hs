@@ -256,13 +256,17 @@ inlineToOpenXML opts (Subscript lst) =
 inlineToOpenXML opts (Superscript lst) =
   withProp (selfClosingTag "w:vertAlign" [("w:val","superscript")])
   $ inlinesToOpenXML opts lst
-{-
-inlineToOpenXML opts (Strikeout lst) =
-  inTags False "emphasis" [("role", "strikethrough")] $
-  inlinesToOpenXML opts lst
 inlineToOpenXML opts (SmallCaps lst) =
-  inTags False "emphasis" [("role", "smallcaps")] $
-  inlinesToOpenXML opts lst
+  withProp (selfClosingTag "w:smallCaps" [])
+  $ inlinesToOpenXML opts lst
+inlineToOpenXML opts (Strikeout lst) =
+  withProp (selfClosingTag "w:strike" [])
+  $ inlinesToOpenXML opts lst
+inlineToOpenXML _ LineBreak = return $ selfClosingTag "w:br" []
+inlineToOpenXML _ (RawInline f x) | f == "openxml" = return $ text x
+                                  | otherwise      = return empty
+
+{-
 inlineToOpenXML opts (Quoted _ lst) =
   inTagsSimple "quote" $ inlinesToOpenXML opts lst
 inlineToOpenXML opts (Cite _ lst) =
@@ -270,9 +274,6 @@ inlineToOpenXML opts (Cite _ lst) =
 inlineToOpenXML _ (Code _ str) =
   inTagsSimple "literal" $ text (escapeStringForXML str)
 inlineToOpenXML opts (Math _ str) = inlinesToOpenXML opts $ readTeXMath str
-inlineToOpenXML _ (RawInline f x) | f == "html" || f == "docbook" = text x
-                                  | otherwise                     = empty
-inlineToOpenXML _ LineBreak = inTagsSimple "literallayout" empty
 inlineToOpenXML opts (Link txt (src, _)) =
   if isPrefixOf "mailto:" src
      then let src' = drop 7 src
