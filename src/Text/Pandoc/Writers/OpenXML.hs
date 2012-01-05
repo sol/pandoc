@@ -70,7 +70,9 @@ writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) =
       convertSpace xs = xs
       blocks' = bottomUp convertSpace $ blocks
       (doc,st) = runState (blocksToOpenXML opts blocks') defaultWriterState
-      notes    = inTagsIndented "w:footnotes" $ vcat $ reverse $ stFootnotes st
+      notes    = case reverse (stFootnotes st) of
+                        [] -> empty
+                        ns -> inTagsIndented "w:footnotes" $ vcat ns
       main     = render' $ doc $$ notes
       context = writerVariables opts ++
                 [ ("body", main)
@@ -310,15 +312,22 @@ inlineToOpenXML _ (Code _ str) =
 inlineToOpenXML opts (Note bs) = do
   notes <- gets stFootnotes
   let notenum = length notes + 1
-  let noteref = inTagsIndented "w:r"
-                $  inTagsIndented "w:rPr" (rStyle "FootnoteReference")
-                $$ selfClosingTag "w:footnoteReference" [("w:id",show notenum)]
-  contents <- withParaProp (pStyle "FootnoteText") $ blocksToOpenXML opts bs
+  let notemarker = inTagsIndented "w:r"
+                   $ inTagsIndented "w:rPr" (rStyle "FootnoteReference")
+                   $$ selfClosingTag "w:footnoteRef" []
+  let notemarkerXml = RawInline "openxml" $ render Nothing notemarker
+  let insertNoteRef (Plain ils : xs) = Plain (notemarkerXml : ils) : xs
+      insertNoteRef (Para ils  : xs) = Para  (notemarkerXml : ils) : xs
+      insertNoteRef xs               = Para [notemarkerXml] : xs
+  contents <- withParaProp (pStyle "FootnoteText") $ blocksToOpenXML opts
+                $ insertNoteRef bs
   -- TODO need to add note ref inside first para.
   -- maybe the note alos needs to go in a separate file???
-  let newnote = inTags True "w:footnote" [("w:id",show notenum)] contents
+  let newnote = inTags True "w:footnote" [("w:id",show notenum)] $ contents
   modify $ \s -> s{ stFootnotes = newnote : notes }
-  return noteref
+  return $ inTagsIndented "w:r"
+           $  inTagsIndented "w:rPr" (rStyle "FootnoteReference")
+           $$ selfClosingTag "w:footnoteReference" [("w:id", show notenum)]
 
 {-
 inlineToOpenXML opts (Link txt (src, _)) =
