@@ -70,7 +70,7 @@ writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) =
       convertSpace xs = xs
       blocks' = bottomUp convertSpace $ blocks
       (doc,st) = runState (blocksToOpenXML opts blocks') defaultWriterState
-      notes    = vcat $ reverse $ stFootnotes st
+      notes    = inTagsIndented "w:footnotes" $ vcat $ reverse $ stFootnotes st
       main     = render' $ doc $$ notes
       context = writerVariables opts ++
                 [ ("body", main)
