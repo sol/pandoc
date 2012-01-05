@@ -38,6 +38,8 @@ import Data.List ( isPrefixOf, intercalate, isSuffixOf )
 import Data.Char ( toLower )
 import Text.Pandoc.Highlighting ( languages, languagesByExtension )
 import Text.Pandoc.Pretty
+import Text.XML.Light.Output
+import Text.TeXMath
 import Control.Monad.State
 
 data WriterState = WriterState{
@@ -301,7 +303,14 @@ inlineToOpenXML opts (Quoted quoteType lst) =
     where (open, close) = case quoteType of
                             SingleQuote -> ("\x2018", "\x2019")
                             DoubleQuote -> ("\x201C", "\x201D")
-inlineToOpenXML opts (Math _ str) = inlinesToOpenXML opts $ readTeXMath str
+inlineToOpenXML opts (Math t str) =
+  case texMathToOMML dt str of
+        Right r -> return $ text $ ppcElement conf r
+        Left  _ -> inlinesToOpenXML opts (readTeXMath str)
+    where dt = if t == InlineMath
+                  then DisplayInline
+                  else DisplayBlock
+          conf = useShortEmptyTags (const False) defaultConfigPP
 inlineToOpenXML opts (Cite _ lst) = inlinesToOpenXML opts lst
 inlineToOpenXML _ (Code _ str) =
   return $
