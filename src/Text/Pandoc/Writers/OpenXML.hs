@@ -46,6 +46,7 @@ data WriterState = WriterState{
          stTextProperties :: [Doc]
        , stParaProperties :: [Doc]
        , stFootnotes      :: [Doc]
+       , stSectionIds     :: [String]
        }
 
 defaultWriterState :: WriterState
@@ -53,6 +54,7 @@ defaultWriterState = WriterState{
         stTextProperties = []
       , stParaProperties = []
       , stFootnotes      = []
+      , stSectionIds     = []
       }
 
 type WS = State WriterState
@@ -140,14 +142,25 @@ blockToOpenXML opts (Para [Image txt (src,_)]) =
 -}
 blockToOpenXML opts (Header lev lst) = do
   contents <- inlinesToOpenXML opts lst
+  usedIdents <- gets stSectionIds
+  let ident = uniqueIdent lst usedIdents
+  modify $ \s -> s{ stSectionIds = ident : stSectionIds s }
+  let bookmarkStart = selfClosingTag "w:bookmarkStart" [("w:id",ident),
+                                                        ("w:name",ident)]
+  let bookmarkEnd = selfClosingTag "w:bookmarkEnd" [("w:id",ident)]
   return $ inTagsIndented "w:p"
-         $ (inTagsIndented "w:pPr" $ pStyle ("Heading" ++ show lev)) $$ contents
+         $ (inTagsIndented "w:pPr" $ pStyle ("Heading" ++ show lev)) $$
+            bookmarkStart $$ contents $$ bookmarkEnd
 blockToOpenXML opts (Plain lst) =
   inlinesToOpenXML opts lst
 blockToOpenXML opts (Para lst) = inTagsIndented "w:p" `fmap` inlinesToOpenXML opts lst
 blockToOpenXML _ (RawBlock format str)
   | format == "openxml" = return $ text str -- raw XML block
   | otherwise           = return empty
+-- FIXME
+blockToOpenXML opts x =
+  blockToOpenXML opts (Para [Str "BLOCK"])
+
 {-
 blockToOpenXML opts (BlockQuote blocks) =
   inTagsIndented "blockquote" $ blocksToOpenXML opts blocks
@@ -335,7 +348,13 @@ inlineToOpenXML opts (Note bs) = do
   return $ inTagsIndented "w:r"
            $  inTagsIndented "w:rPr" (rStyle "FootnoteReference")
            $$ selfClosingTag "w:footnoteReference" [("w:id", show notenum)]
-
+-- internal link:
+inlineToOpenXML opts (Link txt ('#':xs,_)) = do
+  contents <- inlinesToOpenXML opts txt
+  return $ inTags True "w:hyperlink" [("w:anchor",xs)] contents
+-- FIXME
+inlineToOpenXML opts x =
+  inlineToOpenXML opts (Str "INLINE")
 {-
 inlineToOpenXML opts (Link txt (src, _)) =
   if isPrefixOf "mailto:" src
