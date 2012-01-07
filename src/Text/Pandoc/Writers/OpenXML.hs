@@ -330,8 +330,6 @@ inlineToOpenXML opts (Note bs) = do
       insertNoteRef xs               = Para [notemarkerXml] : xs
   contents <- withParaProp (pStyle "FootnoteText") $ blocksToOpenXML opts
                 $ insertNoteRef bs
-  -- TODO need to add note ref inside first para.
-  -- maybe the note alos needs to go in a separate file???
   let newnote = inTags True "w:footnote" [("w:id",show notenum)] $ contents
   modify $ \s -> s{ stFootnotes = newnote : notes }
   return $ inTagsIndented "w:r"
