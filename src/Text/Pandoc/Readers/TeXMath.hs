@@ -69,6 +69,9 @@ expToInlines (ESymbol t s) = Just $ addSpace t (Str s)
         medspace  = Str "\x2005"
         widespace = Str "\x2004"
 expToInlines (EStretchy x) = expToInlines x
+expToInlines (EDelimited start end xs) = do
+  xs' <- mapM expToInlines xs
+  return $ [Str start] ++ concat xs' ++ [Str end]
 expToInlines (EGrouped xs) = expsToInlines xs
 expToInlines (ESpace "0.167em") = Just [Str "\x2009"]
 expToInlines (ESpace "0.222em") = Just [Str "\x2005"]
