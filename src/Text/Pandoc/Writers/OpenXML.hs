@@ -333,12 +333,8 @@ inlineToOpenXML opts (Math t str) =
                   else DisplayBlock
           conf = useShortEmptyTags (const False) defaultConfigPP
 inlineToOpenXML opts (Cite _ lst) = inlinesToOpenXML opts lst
-inlineToOpenXML _ (Code _ str) =
-  return $
-    inTagsIndented "w:r" $
-      inTagsIndented "w:rPr" (rStyle "VerbatimChar") $$
-      inTags False "w:t" [("xml:space","preserve")]
-          (text $ escapeStringForXML str)
+inlineToOpenXML opts (Code _ str) =
+  withTextProp (rStyle "VerbatimChar") $ inlineToOpenXML opts (Str str)
 inlineToOpenXML opts (Note bs) = do
   notes <- gets stFootnotes
   let notenum = length notes + 1
