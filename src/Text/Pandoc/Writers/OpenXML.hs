@@ -34,7 +34,7 @@ import Text.Pandoc.Generic
 import Text.Pandoc.Shared
 import Text.Pandoc.Templates (renderTemplate)
 import Text.Pandoc.Readers.TeXMath
-import Data.List ( isPrefixOf, intercalate, isSuffixOf )
+import Data.List ( isPrefixOf, intercalate, isSuffixOf, sort, elemIndex )
 import Data.Char ( toLower )
 import Text.Pandoc.Highlighting ( languages, languagesByExtension )
 import Text.Pandoc.Pretty
@@ -47,6 +47,7 @@ data WriterState = WriterState{
        , stParaProperties :: [Doc]
        , stFootnotes      :: [Doc]
        , stSectionIds     :: [String]
+       , stExternalLinks  :: [String] -- external links sorted
        }
 
 defaultWriterState :: WriterState
@@ -55,6 +56,7 @@ defaultWriterState = WriterState{
       , stParaProperties = []
       , stFootnotes      = []
       , stSectionIds     = []
+      , stExternalLinks  = []
       }
 
 type WS = State WriterState
@@ -73,7 +75,13 @@ writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) =
       convertSpace (Str x : Str y : xs) = Str (x ++ y) : xs
       convertSpace xs = xs
       blocks' = bottomUp convertSpace $ blocks
-      (doc,st) = runState (blocksToOpenXML opts blocks') defaultWriterState
+      isInternal ('#':_) = True
+      isInternal _       = False
+      findLink x@(Link _ (s,_)) = [s | not (isInternal s)]
+      findLink x = []
+      extlinks = sort $ queryWith findLink blocks'
+      (doc,st) = runState (blocksToOpenXML opts blocks')
+                   defaultWriterState{ stExternalLinks = extlinks }
       notes    = case reverse (stFootnotes st) of
                         [] -> empty
                         ns -> inTagsIndented "w:footnotes" $ vcat ns
@@ -352,6 +360,14 @@ inlineToOpenXML opts (Note bs) = do
 inlineToOpenXML opts (Link txt ('#':xs,_)) = do
   contents <- withTextProp (rStyle "Hyperlink") $ inlinesToOpenXML opts txt
   return $ inTags True "w:hyperlink" [("w:anchor",xs)] contents
+inlineToOpenXML opts (Link txt (src,_)) = do
+  contents <- withTextProp (rStyle "Hyperlink") $ inlinesToOpenXML opts txt
+  extlinks <- gets stExternalLinks
+  return $
+    case elemIndex src extlinks of
+         Just ind -> inTags True "w:hyperlink"
+                        [("w:id","link" ++ show ind)] contents
+         Nothing  -> inTags True "w:hyperlink" [] contents  -- shouldn't happen
 -- FIXME
 inlineToOpenXML opts x =
   inlineToOpenXML opts (Str "INLINE")
