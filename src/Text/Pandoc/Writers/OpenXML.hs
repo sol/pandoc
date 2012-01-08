@@ -34,7 +34,7 @@ import Text.Pandoc.Generic
 import Text.Pandoc.Shared
 import Text.Pandoc.Templates (renderTemplate)
 import Text.Pandoc.Readers.TeXMath
-import Data.List ( isPrefixOf, intercalate, isSuffixOf, sort, elemIndex )
+import Data.List ( isPrefixOf, intercalate, isSuffixOf, sort, elemIndex, nub )
 import Data.Char ( toLower )
 import Text.Pandoc.Highlighting ( languages, languagesByExtension )
 import Text.Pandoc.Pretty
@@ -79,7 +79,7 @@ writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) =
       isInternal _       = False
       findLink x@(Link _ (s,_)) = [s | not (isInternal s)]
       findLink x = []
-      extlinks = sort $ queryWith findLink blocks'
+      extlinks = nub $ sort $ queryWith findLink blocks'
       (doc,st) = runState (blocksToOpenXML opts blocks')
                    defaultWriterState{ stExternalLinks = extlinks }
       notes    = case reverse (stFootnotes st) of
