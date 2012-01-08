@@ -350,7 +350,7 @@ inlineToOpenXML opts (Note bs) = do
            $$ selfClosingTag "w:footnoteReference" [("w:id", show notenum)]
 -- internal link:
 inlineToOpenXML opts (Link txt ('#':xs,_)) = do
-  contents <- inlinesToOpenXML opts txt
+  contents <- withTextProp (rStyle "Hyperlink") $ inlinesToOpenXML opts txt
   return $ inTags True "w:hyperlink" [("w:anchor",xs)] contents
 -- FIXME
 inlineToOpenXML opts x =
