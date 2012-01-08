@@ -365,29 +365,39 @@ inlineToOpenXML opts (Link txt (src,_)) = do
          Just ind -> inTags True "w:hyperlink"
                         [("r:id","link" ++ show ind)] contents
          Nothing  -> inTags True "w:hyperlink" [] contents  -- shouldn't happen
+-- see image-example.openxml.xml
+inlineToOpenXML _ (Image _ (src, tit)) = do
+  let ident = "image0" -- FIXME
+  let cNvPicPr = inTagsIndented "pic:cNvPicPr" $
+                   selfClosingTag "a:picLocks" [("noChangeArrowheads","1"),("noChangeAspect","1")]
+  let nvPicPr  = inTagsIndented "pic:nvPicPr" $
+                   selfClosingTag "pic:cNvPr"
+                    [("descr",tit),("id","0"),("name","Picture")] $$
+                   cNvPicPr
+  let blipFill = inTagsIndented "pic:blipFill" $
+                    selfClosingTag "a:blip" [("r:embed",ident)]
+  let xfrm =    inTagsIndented "a:xfrm" $
+                  selfClosingTag "a:off" [("x","0"),("y","0")] $$
+                  selfClosingTag "a:ext" [("cx","20000"),("cy","20000")]
+  let prstGeom = inTags True "a:prstGeom" [("prst","rect")] $
+                   selfClosingTag "a:avLst" []
+  let ln =      inTags True "a:ln" [("w","9525")] $
+                   selfClosingTag "a:noFill" [] $$
+                   selfClosingTag "a:miter" [("lim","800000")] $$
+                   selfClosingTag "a:headEnd" [] $$
+                   selfClosingTag "a:tailEnd" []
+  let spPr =    inTags True "pic:spPr" [("bwMode","auto")] $
+                  xfrm $$ prstGeom $$ selfClosingTag "a:noFill" [] $$ ln
+  let graphic = inTagsIndented "a:graphic" $
+                  inTags True "a:graphicData" [("uri","http://schemas.openxmlformats.org/drawingml/2006/picture")] $
+                    inTagsIndented "pic:pic" $ nvPicPr $$ blipFill $$ spPr
+  return $ inTagsIndented "w:r" $
+      inTagsIndented "w:drawing" $
+        inTags True "wp:inline" [] $
+          selfClosingTag "wp:extent" [("cx","20000"),("cy","20000")] $$
+          selfClosingTag "wp:effectExtent" [("b","0"),("l","0"),("r","0"),("t","0")] $$
+          selfClosingTag "wp:docPr" [("descr",tit),("id","1"),("name","Picture")] $$
+          graphic
 -- FIXME
 inlineToOpenXML opts x =
   inlineToOpenXML opts (Str "INLINE")
-{-
-inlineToOpenXML opts (Link txt (src, _)) =
-  if isPrefixOf "mailto:" src
-     then let src' = drop 7 src
-              emailLink = inTagsSimple "email" $ text $
-                          escapeStringForXML $ src'
-          in  case txt of
-               [Code _ s] | s == src' -> emailLink
-               _             -> inlinesToOpenXML opts txt <+>
-                                  char '(' <> emailLink <> char ')'
-     else (if isPrefixOf "#" src
-              then inTags False "link" [("linkend", drop 1 src)]
-              else inTags False "ulink" [("url", src)]) $
-          inlinesToOpenXML opts txt
--- see image-example.openxml.xml
-inlineToOpenXML _ (Image _ (src, tit)) =
-  let titleDoc = if null tit
-                   then empty
-                   else inTagsIndented "objectinfo" $
-
-  in  inTagsIndented "inlinemediaobject" $ inTagsIndented "imageobject" $
-      titleDoc $$ selfClosingTag "imagedata" [("fileref", src)]
--}
