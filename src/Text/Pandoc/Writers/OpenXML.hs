@@ -139,6 +139,7 @@ rStyle sty = selfClosingTag "w:rStyle" [("w:val",sty)]
 blockToOpenXML :: WriterOptions -> Block -> WS Doc
 blockToOpenXML _ Null = return empty
 {-
+ - see image-example.openxml.xml
 blockToOpenXML opts (Para [Image txt (src,_)]) =
   let capt = inlinesToOpenXML opts txt
   in  inTagsIndented "figure" $
@@ -149,29 +150,29 @@ blockToOpenXML opts (Para [Image txt (src,_)]) =
            inTagsSimple "textobject" (inTagsSimple "phrase" capt))
 -}
 blockToOpenXML opts (Header lev lst) = do
-  contents <- inlinesToOpenXML opts lst
+  contents <- withParaProp (pStyle $ "Heading" ++ show lev) $
+               blockToOpenXML opts (Para lst)
   usedIdents <- gets stSectionIds
   let ident = uniqueIdent lst usedIdents
   modify $ \s -> s{ stSectionIds = ident : stSectionIds s }
   let bookmarkStart = selfClosingTag "w:bookmarkStart" [("w:id",ident),
                                                         ("w:name",ident)]
   let bookmarkEnd = selfClosingTag "w:bookmarkEnd" [("w:id",ident)]
-  return $ inTagsIndented "w:p"
-         $ (inTagsIndented "w:pPr" $ pStyle ("Heading" ++ show lev)) $$
-            bookmarkStart $$ contents $$ bookmarkEnd
-blockToOpenXML opts (Plain lst) =
-  inlinesToOpenXML opts lst
-blockToOpenXML opts (Para lst) = inTagsIndented "w:p" `fmap` inlinesToOpenXML opts lst
+  return $ bookmarkStart $$ contents $$ bookmarkEnd
+blockToOpenXML opts (Plain lst) = blockToOpenXML opts (Para lst)
+blockToOpenXML opts (Para lst) = do
+  paraProps <- getParaProps
+  contents <- inlinesToOpenXML opts lst
+  return $ inTagsIndented "w:p" $ paraProps $$ contents
 blockToOpenXML _ (RawBlock format str)
   | format == "openxml" = return $ text str -- raw XML block
   | otherwise           = return empty
--- FIXME
+blockToOpenXML opts (BlockQuote blocks) =
+  withParaProp (pStyle "BlockQuote") $ blocksToOpenXML opts blocks
 blockToOpenXML opts x =
   blockToOpenXML opts (Para [Str "BLOCK"])
 
 {-
-blockToOpenXML opts (BlockQuote blocks) =
-  inTagsIndented "blockquote" $ blocksToOpenXML opts blocks
 blockToOpenXML _ (CodeBlock (_,classes,_) str) =
   text ("<programlisting" ++ lang ++ ">") <> cr <>
      flush (text (escapeStringForXML str) <> cr <> text "</programlisting>")
@@ -381,6 +382,7 @@ inlineToOpenXML opts (Link txt (src, _)) =
               then inTags False "link" [("linkend", drop 1 src)]
               else inTags False "ulink" [("url", src)]) $
           inlinesToOpenXML opts txt
+-- see image-example.openxml.xml
 inlineToOpenXML _ (Image _ (src, tit)) =
   let titleDoc = if null tit
                    then empty
