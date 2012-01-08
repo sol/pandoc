@@ -362,7 +362,7 @@ inlineToOpenXML opts (Link txt (src,_)) = do
   return $
     case elemIndex src extlinks of
          Just ind -> inTags True "w:hyperlink"
-                        [("w:id","link" ++ show ind)] contents
+                        [("r:id","link" ++ show ind)] contents
          Nothing  -> inTags True "w:hyperlink" [] contents  -- shouldn't happen
 -- FIXME
 inlineToOpenXML opts x =

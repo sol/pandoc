@@ -29,7 +29,7 @@ Conversion of 'Pandoc' documents to docx.
 -}
 module Text.Pandoc.Writers.Docx ( writeDocx ) where
 import Data.IORef
-import Data.List ( isPrefixOf )
+import Data.List ( isPrefixOf, nub, sort )
 import System.FilePath ( (</>), takeExtension )
 import qualified Data.ByteString.Lazy as B
 import Data.ByteString.Lazy.UTF8 ( fromString )
@@ -73,6 +73,14 @@ writeDocx mbRefDocx opts doc = do
   doc' <- bottomUpM (transformPic sourceDir picEntriesRef) doc
   -}
   let doc' = doc  -- TODO temp
+  let isInternal ('#':_) = True
+      isInternal _       = False
+  let findLink x@(Link _ (s,_)) = [s | not (isInternal s)]
+      findLink x = []
+  let extlinks = nub $ sort $ queryWith findLink doc'
+  -- TODO use this to write word/_rels/document.xml.rels
+  -- for each link, we need:
+  -- <Relationship Id="link0"  Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"  Target="http://google.com/" TargetMode="External" />
   let newContents = writeOpenXML opts{writerWrapText = False} doc'
   (TOD epochtime _) <- getClockTime
   let contentEntry = toEntry "word/document.xml" epochtime $ fromString newContents
