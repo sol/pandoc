@@ -56,13 +56,16 @@ import Text.XML.Light.Output
 import Text.TeXMath
 import Control.Monad.State
 
+-- TODO: Remove use of Text.Pandoc.XML; instead use the xml module
+-- throughout.
+
 data WriterState = WriterState{
          stTextProperties :: [Doc]
        , stParaProperties :: [Doc]
        , stFootnotes      :: [Doc]
        , stSectionIds     :: [String]
        , stExternalLinks  :: [String]
-       , stImages         :: [B.ByteString]
+       , stImages         :: [(FilePath,B.ByteString)]
        }
 
 defaultWriterState :: WriterState
@@ -96,23 +99,13 @@ writeDocx mbRefDocx opts doc = do
                         if exists
                            then B.readFile (d </> "reference.docx")
                            else defaultDocx
-  
-  {-
-  -- handle pictures
-  picEntriesRef <- newIORef ([] :: [Entry])
-  let sourceDir = writerSourceDirectory opts
-  doc' <- bottomUpM (transformPic sourceDir picEntriesRef) doc
-  -}
-  let doc' = doc  -- TODO temp
-  let isInternal ('#':_) = True
-      isInternal _       = False
-  let findLink x@(Link _ (s,_)) = [s | not (isInternal s)]
-      findLink x = []
-  let extlinks = nub $ sort $ queryWith findLink doc'
+
+  (newContents, st) <- runStateT (writeOpenXML opts{writerWrapText = False} doc) defaultWriterState
+  -- NOW get list of external links and images from this, and do what's needed
+  -- with them
   -- TODO use this to write word/_rels/document.xml.rels
   -- for each link, we need:
   -- <Relationship Id="link0"  Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"  Target="http://google.com/" TargetMode="External" />
-  (newContents, st) <- runStateT (writeOpenXML opts{writerWrapText = False} doc') defaultWriterState
   (TOD epochtime _) <- getClockTime
   let contentEntry = toEntry "word/document.xml" epochtime $ fromString newContents
   {-
@@ -184,11 +177,7 @@ writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) = do
   let notes    = case notes' of
                       [] -> empty
                       ns -> inTagsIndented "w:footnotes" $ vcat ns
-  -- TODO do something with metadata
-  let context = writerVariables opts ++
-               [ ("title", render' title)
-               , ("date", render' date) ] ++
-               [ ("author", render' a) | a <- authors ]
+  -- TODO do something with metadata (title, date, author)
   -- TODO eventually use xml module
   return $ render' $ text "<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
         $$ inTags True "w:document"
