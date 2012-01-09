@@ -461,6 +461,9 @@ inlineToOpenXML opts (Link txt (src,_)) = do
 -- see image-example.openxml.xml
 inlineToOpenXML _ (Image _ (src, tit)) = do
   let ident = "image0" -- FIXME
+  size <- liftIO $ readImageSize src  -- TODO check for existence etc.
+  let (xpix,ypix) = maybe (100,100) id size
+  let (xemu,yemu) = (xpix * 914400 `div` 96, ypix * 914400 `div` 96) -- 96 dpi
   let cNvPicPr = mknode "pic:cNvPicPr" [] $
                    mknode "a:picLocks" [("noChangeArrowheads","1"),("noChangeAspect","1")] ()
   let nvPicPr  = mknode "pic:nvPicPr" []
@@ -471,7 +474,7 @@ inlineToOpenXML _ (Image _ (src, tit)) = do
                     mknode "a:blip" [("r:embed",ident)] ()
   let xfrm =    mknode "a:xfrm" []
                   [ mknode "a:off" [("x","0"),("y","0")] ()
-                  , mknode "a:ext" [("cx","1800000"),("cy","1800000")] () ]
+                  , mknode "a:ext" [("cx",show xemu),("cy",show yemu)] () ]
   let prstGeom = mknode "a:prstGeom" [("prst","rect")] $
                    mknode "a:avLst" [] ()
   let ln =      mknode "a:ln" [("w","9525")]
@@ -488,7 +491,7 @@ inlineToOpenXML _ (Image _ (src, tit)) = do
   return [ mknode "w:r" [] $
       mknode "w:drawing" [] $
         mknode "wp:inline" []
-          [ mknode "wp:extent" [("cx","1800000"),("cy","1800000")] ()
+          [ mknode "wp:extent" [("cx",show xemu),("cy",show yemu)] ()
           , mknode "wp:effectExtent" [("b","0"),("l","0"),("r","0"),("t","0")] ()
           , mknode "wp:docPr" [("descr",tit),("id","1"),("name","Picture")] ()
           , graphic ] ]
