@@ -378,12 +378,11 @@ inlineToOpenXML _ (Image _ (src, tit)) = do
                     selfClosingTag "a:blip" [("r:embed",ident)]
   let xfrm =    inTagsIndented "a:xfrm" $
                   selfClosingTag "a:off" [("x","0"),("y","0")] $$
-                  selfClosingTag "a:ext" [("cx","20000"),("cy","20000")]
+                  selfClosingTag "a:ext" [("cx","1800000"),("cy","1800000")]
   let prstGeom = inTags True "a:prstGeom" [("prst","rect")] $
                    selfClosingTag "a:avLst" []
   let ln =      inTags True "a:ln" [("w","9525")] $
                    selfClosingTag "a:noFill" [] $$
-                   selfClosingTag "a:miter" [("lim","800000")] $$
                    selfClosingTag "a:headEnd" [] $$
                    selfClosingTag "a:tailEnd" []
   let spPr =    inTags True "pic:spPr" [("bwMode","auto")] $
@@ -394,7 +393,7 @@ inlineToOpenXML _ (Image _ (src, tit)) = do
   return $ inTagsIndented "w:r" $
       inTagsIndented "w:drawing" $
         inTags True "wp:inline" [] $
-          selfClosingTag "wp:extent" [("cx","20000"),("cy","20000")] $$
+          selfClosingTag "wp:extent" [("cx","1800000"),("cy","1800000")] $$
           selfClosingTag "wp:effectExtent" [("b","0"),("l","0"),("r","0"),("t","0")] $$
           selfClosingTag "wp:docPr" [("descr",tit),("id","1"),("name","Picture")] $$
           graphic
