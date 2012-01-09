@@ -18,7 +18,7 @@ Description:     Pandoc is a Haskell library for converting from one markup
                  this library. It can read markdown and (subsets of)
                  reStructuredText, HTML, LaTeX and Textile, and it can write
                  markdown, reStructuredText, HTML, LaTeX, ConTeXt, Docbook,
-                 OpenDocument, OpenXML, ODT, Word docx, RTF, MediaWiki, Textile,
+                 OpenDocument, ODT, Word docx, RTF, MediaWiki, Textile,
                  groff man pages, plain text, Emacs Org-Mode, AsciiDoc, EPUB,
                  and S5 and Slidy HTML slide shows.
                  .
@@ -46,7 +46,6 @@ Data-Files:
                  templates/default.s5, templates/default.slidy,
                  templates/default.dzslides, templates/default.asciidoc,
                  templates/default.textile, templates/default.org,
-                 templates/default.openxml,
                  templates/epub-titlepage.html, templates/epub-page.html,
                  templates/epub-coverimage.html,
                  -- data for ODT writer
@@ -261,7 +260,6 @@ Library
                    Text.Pandoc.Writers.LaTeX,
                    Text.Pandoc.Writers.ConTeXt,
                    Text.Pandoc.Writers.OpenDocument,
-                   Text.Pandoc.Writers.OpenXML,
                    Text.Pandoc.Writers.Texinfo,
                    Text.Pandoc.Writers.Man,
                    Text.Pandoc.Writers.Markdown,

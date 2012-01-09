@@ -89,7 +89,6 @@ module Text.Pandoc
                , writeHtmlString
                , writeDocbook
                , writeOpenDocument
-               , writeOpenXML
                , writeMan
                , writeMediaWiki
                , writeTextile
@@ -134,7 +133,6 @@ import Text.Pandoc.Writers.Docx
 import Text.Pandoc.Writers.EPUB
 import Text.Pandoc.Writers.Docbook
 import Text.Pandoc.Writers.OpenDocument
-import Text.Pandoc.Writers.OpenXML
 import Text.Pandoc.Writers.Man
 import Text.Pandoc.Writers.RTF 
 import Text.Pandoc.Writers.MediaWiki
@@ -187,7 +185,6 @@ writers = [("native"       , writeNative)
           ,("dzslides"     , writeHtmlString)
           ,("docbook"      , writeDocbook)
           ,("opendocument" , writeOpenDocument)
-          ,("openxml"      , writeOpenXML)
           ,("latex"        , writeLaTeX)
           ,("latex+lhs"    , \o ->
                              writeLaTeX o{ writerLiterateHaskell = True })
