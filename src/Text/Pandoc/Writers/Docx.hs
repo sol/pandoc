@@ -90,7 +90,7 @@ writeDocx mbRefDocx opts doc = do
   -- TODO use this to write word/_rels/document.xml.rels
   -- for each link, we need:
   -- <Relationship Id="link0"  Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"  Target="http://google.com/" TargetMode="External" />
-  let newContents = writeOpenXML opts{writerWrapText = False} doc'
+  newContents <- writeOpenXML opts{writerWrapText = False} doc'
   (TOD epochtime _) <- getClockTime
   let contentEntry = toEntry "word/document.xml" epochtime $ fromString newContents
   {-
@@ -155,41 +155,41 @@ defaultWriterState = WriterState{
       , stExternalLinks  = []
       }
 
-type WS = State WriterState
+type WS a = StateT WriterState IO a
 
 -- | Convert Pandoc document to string in OpenXML format.
-writeOpenXML :: WriterOptions -> Pandoc -> String
-writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) =
+writeOpenXML :: WriterOptions -> Pandoc -> IO String
+writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) = do
   let title = empty -- inlinesToOpenXML opts tit
-      authors = [] -- map (authorToOpenXML opts) auths
-      date = empty -- inlinesToOpenXML opts dat
-      colwidth = if writerWrapText opts
+  let authors = [] -- map (authorToOpenXML opts) auths
+  let date = empty -- inlinesToOpenXML opts dat
+  let colwidth = if writerWrapText opts
                     then Just $ writerColumns opts
                     else Nothing
-      render' = render colwidth
-      convertSpace (Str x : Space : Str y : xs) = Str (x ++ " " ++ y) : xs
+  let render' = render colwidth
+  let convertSpace (Str x : Space : Str y : xs) = Str (x ++ " " ++ y) : xs
       convertSpace (Str x : Str y : xs) = Str (x ++ y) : xs
       convertSpace xs = xs
-      blocks' = bottomUp convertSpace $ blocks
-      isInternal ('#':_) = True
+  let blocks' = bottomUp convertSpace $ blocks
+  let isInternal ('#':_) = True
       isInternal _       = False
-      findLink x@(Link _ (s,_)) = [s | not (isInternal s)]
+  let findLink x@(Link _ (s,_)) = [s | not (isInternal s)]
       findLink x = []
       extlinks = nub $ sort $ queryWith findLink blocks'
-      (doc,st) = runState (blocksToOpenXML opts blocks')
+  (doc,st) <- runStateT (blocksToOpenXML opts blocks')
                    defaultWriterState{ stExternalLinks = extlinks }
-      notes    = case reverse (stFootnotes st) of
-                        [] -> empty
-                        ns -> inTagsIndented "w:footnotes" $ vcat ns
-      main     = render' $ doc $$ notes
-      context = writerVariables opts ++
-                [ ("body", main)
-                , ("title", render' title)
-                , ("date", render' date) ] ++
-                [ ("author", render' a) | a <- authors ]
-  in  if writerStandalone opts
-         then renderTemplate context $ writerTemplate opts
-         else main
+  let notes    = case reverse (stFootnotes st) of
+                       [] -> empty
+                       ns -> inTagsIndented "w:footnotes" $ vcat ns
+  let main     = render' $ doc $$ notes
+  let context = writerVariables opts ++
+               [ ("body", main)
+               , ("title", render' title)
+               , ("date", render' date) ] ++
+               [ ("author", render' a) | a <- authors ]
+  return $ if writerStandalone opts
+              then renderTemplate context $ writerTemplate opts
+              else main
 
 -- | Convert a list of Pandoc blocks to OpenXML.
 blocksToOpenXML :: WriterOptions -> [Block] -> WS Doc
