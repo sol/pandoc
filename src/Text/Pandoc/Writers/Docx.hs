@@ -56,6 +56,27 @@ import Text.XML.Light.Output
 import Text.TeXMath
 import Control.Monad.State
 
+data WriterState = WriterState{
+         stTextProperties :: [Doc]
+       , stParaProperties :: [Doc]
+       , stFootnotes      :: [Doc]
+       , stSectionIds     :: [String]
+       , stExternalLinks  :: [String]
+       , stImages         :: [B.ByteString]
+       }
+
+defaultWriterState :: WriterState
+defaultWriterState = WriterState{
+        stTextProperties = []
+      , stParaProperties = []
+      , stFootnotes      = []
+      , stSectionIds     = []
+      , stExternalLinks  = []
+      , stImages         = []
+      }
+
+type WS a = StateT WriterState IO a
+
 -- | Produce an Docx file from a Pandoc document.
 writeDocx :: Maybe FilePath -- ^ Path specified by --reference-docx
           -> WriterOptions  -- ^ Writer options
@@ -75,6 +96,7 @@ writeDocx mbRefDocx opts doc = do
                         if exists
                            then B.readFile (d </> "reference.docx")
                            else defaultDocx
+  
   {-
   -- handle pictures
   picEntriesRef <- newIORef ([] :: [Entry])
@@ -90,7 +112,7 @@ writeDocx mbRefDocx opts doc = do
   -- TODO use this to write word/_rels/document.xml.rels
   -- for each link, we need:
   -- <Relationship Id="link0"  Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"  Target="http://google.com/" TargetMode="External" />
-  newContents <- writeOpenXML opts{writerWrapText = False} doc'
+  (newContents, st) <- runStateT (writeOpenXML opts{writerWrapText = False} doc') defaultWriterState
   (TOD epochtime _) <- getClockTime
   let contentEntry = toEntry "word/document.xml" epochtime $ fromString newContents
   {-
@@ -138,27 +160,8 @@ transformPic sourceDir entriesRef (Image lab (src,tit)) = do
 transformPic _ _ x = return x
 -}
 
-data WriterState = WriterState{
-         stTextProperties :: [Doc]
-       , stParaProperties :: [Doc]
-       , stFootnotes      :: [Doc]
-       , stSectionIds     :: [String]
-       , stExternalLinks  :: [String] -- external links sorted
-       }
-
-defaultWriterState :: WriterState
-defaultWriterState = WriterState{
-        stTextProperties = []
-      , stParaProperties = []
-      , stFootnotes      = []
-      , stSectionIds     = []
-      , stExternalLinks  = []
-      }
-
-type WS a = StateT WriterState IO a
-
 -- | Convert Pandoc document to string in OpenXML format.
-writeOpenXML :: WriterOptions -> Pandoc -> IO String
+writeOpenXML :: WriterOptions -> Pandoc -> WS String
 writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) = do
   let title = empty -- inlinesToOpenXML opts tit
   let authors = [] -- map (authorToOpenXML opts) auths
@@ -171,25 +174,33 @@ writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) = do
       convertSpace (Str x : Str y : xs) = Str (x ++ y) : xs
       convertSpace xs = xs
   let blocks' = bottomUp convertSpace $ blocks
-  let isInternal ('#':_) = True
-      isInternal _       = False
-  let findLink x@(Link _ (s,_)) = [s | not (isInternal s)]
-      findLink x = []
-      extlinks = nub $ sort $ queryWith findLink blocks'
-  (doc,st) <- runStateT (blocksToOpenXML opts blocks')
-                   defaultWriterState{ stExternalLinks = extlinks }
-  let notes    = case reverse (stFootnotes st) of
-                       [] -> empty
-                       ns -> inTagsIndented "w:footnotes" $ vcat ns
-  let main     = render' $ doc $$ notes
+  -- let isInternal ('#':_) = True
+  --     isInternal _       = False
+  -- let findLink x@(Link _ (s,_)) = [s | not (isInternal s)]
+  --     findLink x = []
+  --     extlinks = nub $ sort $ queryWith findLink blocks'
+  doc <- blocksToOpenXML opts blocks' 
+  notes' <- reverse `fmap` gets stFootnotes
+  let notes    = case notes' of
+                      [] -> empty
+                      ns -> inTagsIndented "w:footnotes" $ vcat ns
+  -- TODO do something with metadata
   let context = writerVariables opts ++
-               [ ("body", main)
-               , ("title", render' title)
+               [ ("title", render' title)
                , ("date", render' date) ] ++
                [ ("author", render' a) | a <- authors ]
-  return $ if writerStandalone opts
-              then renderTemplate context $ writerTemplate opts
-              else main
+  -- TODO eventually use xml module
+  return $ render' $ text "<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
+        $$ inTags True "w:document"
+            [("xmlns:w","http://schemas.openxmlformats.org/wordprocessingml/2006/main")
+            ,("xmlns:m","http://schemas.openxmlformats.org/officeDocument/2006/math")
+            ,("xmlns:r","http://schemas.openxmlformats.org/officeDocument/2006/relationships")
+            ,("xmlns:o","urn:schemas-microsoft-com:office:office")
+            ,("xmlns:v","urn:schemas-microsoft-com:vml")
+            ,("xmlns:w10","urn:schemas-microsoft-com:office:word")
+            ,("xmlns:a","http://schemas.openxmlformats.org/drawingml/2006/main")
+            ,("xmlns:pic","http://schemas.openxmlformats.org/drawingml/2006/picture")
+            ,("xmlns:wp","http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing")] (inTagsIndented "w:body" (doc $$ notes))
 
 -- | Convert a list of Pandoc blocks to OpenXML.
 blocksToOpenXML :: WriterOptions -> [Block] -> WS Doc
