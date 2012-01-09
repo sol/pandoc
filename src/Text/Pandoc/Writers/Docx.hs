@@ -46,6 +46,7 @@ import Control.Monad (liftM)
 import Network.URI ( unEscapeString )
 import Text.Pandoc.XML
 import Text.Pandoc.Pretty
+import Text.Pandoc.ImageSize
 
 -- | Produce an Docx file from a Pandoc document.
 writeDocx :: Maybe FilePath -- ^ Path specified by --reference-docx
