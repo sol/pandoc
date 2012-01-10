@@ -32,7 +32,8 @@ import Data.IORef
 import Data.List ( isPrefixOf, nub, sort )
 import System.FilePath ( (</>), takeExtension )
 import qualified Data.ByteString.Lazy as B
-import Data.ByteString.Lazy.UTF8 ( fromString )
+import qualified Data.Map as M
+import Data.ByteString.Lazy.UTF8 ( fromString, toString )
 import Codec.Archive.Zip
 import System.Time
 import Paths_pandoc ( getDataFileName )
@@ -65,7 +66,7 @@ data WriterState = WriterState{
        , stFootnotes      :: [Element]
        , stSectionIds     :: [String]
        , stExternalLinks  :: [String]
-       , stImages         :: [(FilePath,B.ByteString)]
+       , stImages         :: M.Map FilePath (String, B.ByteString)
        }
 
 defaultWriterState :: WriterState
@@ -75,7 +76,7 @@ defaultWriterState = WriterState{
       , stFootnotes      = []
       , stSectionIds     = []
       , stExternalLinks  = []
-      , stImages         = []
+      , stImages         = M.empty
       }
 
 type WS a = StateT WriterState IO a
@@ -104,45 +105,40 @@ writeDocx mbRefDocx opts doc = do
                            then B.readFile (d </> "reference.docx")
                            else defaultDocx
 
-  (newContents, st) <- runStateT (writeOpenXML opts{writerWrapText = False} doc) defaultWriterState
+  (newContents, st) <- runStateT (writeOpenXML opts{writerWrapText = False} doc)
+                       defaultWriterState
+  (TOD epochtime _) <- getClockTime
+  let relpath = "word/_rels/document.xml.rels"
+  let reldoc = case findEntryByPath relpath refArchive >>=
+                    parseXMLDoc . toString . fromEntry of
+                      Just d  -> d
+                      Nothing -> error $ relpath ++ "missing in reference docx"
+  -- TODO modify reldoc by adding image and link info
+  let imgs = M.elems $ stImages st
+  let imgPath ident img = "media/" ++ ident ++
+                            case imageType img of
+                                  Just Png  -> ".png"
+                                  Just Jpeg -> ".jpeg"
+                                  Just Gif  -> ".gif"
+                                  Nothing   -> ""
+  let toImgRel (ident,img) =  mknode "Relationship" [("Type","http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"),("Id",ident),("Target",imgPath ident img)] ()
+  let newrels = map toImgRel imgs
+  let reldoc' = reldoc{ elContent = elContent reldoc ++ map Elem newrels }
+  let relEntry = toEntry relpath epochtime $ fromString $ ppTopElement reldoc'
+  -- create entries for images
+  let toImageEntry (ident,img) = toEntry ("word/" ++ imgPath ident img)
+         epochtime img
+  let imageEntries = map toImageEntry imgs
   -- NOW get list of external links and images from this, and do what's needed
   -- with them
   -- TODO use this to write word/_rels/document.xml.rels
   -- for each link, we need:
   -- <Relationship Id="link0"  Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"  Target="http://google.com/" TargetMode="External" />
-  (TOD epochtime _) <- getClockTime
   let contentEntry = toEntry "word/document.xml" epochtime $ fromString $ ppTopElement newContents
-  {-
-  picEntries <- readIORef picEntriesRef
-  let archive = foldr addEntryToArchive refArchive $ contentEntry : picEntries
-  -}
-  let archive = foldr addEntryToArchive refArchive [contentEntry]
-  {-
-  -- construct META-INF/manifest.xml based on archive
-  let toFileEntry fp = case getMimeType fp of
-                        Nothing  -> empty
-                        Just m   -> selfClosingTag "manifest:file-entry"
-                                     [("manifest:media-type", m)
-                                     ,("manifest:full-path", fp)
-                                     ]
-  let files = [ ent | ent <- filesInArchive archive, not ("META-INF" `isPrefixOf` ent) ]
-  let manifestEntry = toEntry "META-INF/manifest.xml" epochtime
-        $ fromString $ show
-        $ text "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
-        $$
-         ( mknode "manifest:manifest"
-            [("xmlns:manifest","urn:oasis:names:tc:opendocument:xmlns:manifest:1.0")]
-            $ ( selfClosingTag "manifest:file-entry"
-                 [("manifest:media-type","application/vnd.oasis.opendocument.text")
-                 ,("manifest:version","1.2")
-                 ,("manifest:full-path","/")]
-                $$ vcat ( map toFileEntry $ files )
-              )
-         )
-  let archive' = addEntryToArchive manifestEntry archive
-  -}
-  let archive' = archive -- TODO temp
-  return $ fromArchive archive'
+  -- TODO add metadata, etc.
+  let archive = foldr addEntryToArchive refArchive $
+                  contentEntry : relEntry : imageEntries
+  return $ fromArchive archive
 
 {-
 transformPic :: FilePath -> IORef [Entry] -> Inline -> IO Inline
@@ -461,7 +457,17 @@ inlineToOpenXML opts (Link txt (src,_)) = do
 -- see image-example.openxml.xml
 inlineToOpenXML _ (Image _ (src, tit)) = do
   let ident = "image0" -- FIXME
-  size <- liftIO $ readImageSize src  -- TODO check for existence etc.
+  imgs <- gets stImages
+  (ident,size) <- case M.lookup src imgs of
+                       Just (i,img) -> return (i, imageSize img)
+                       Nothing -> do
+                         -- TODO check existence download etc.
+                         img <- liftIO $ B.readFile src
+                         let ident' = "image" ++ show (M.size imgs + 1)
+                         let size'  = imageSize img
+                         modify $ \st -> st{
+                            stImages = M.insert src (ident',img) $ stImages st }
+                         return (ident',size')
   let (xpix,ypix) = maybe (100,100) id size
   let (xemu,yemu) = (xpix * 914400 `div` 96, ypix * 914400 `div` 96) -- 96 dpi
   let cNvPicPr = mknode "pic:cNvPicPr" [] $
@@ -485,9 +491,10 @@ inlineToOpenXML _ (Image _ (src, tit)) = do
                   [xfrm, prstGeom, mknode "a:noFill" [] (), ln]
   let graphic = mknode "a:graphic" [] $
                   mknode "a:graphicData" [("uri","http://schemas.openxmlformats.org/drawingml/2006/picture")]
-                    [ mknode "pic:pic" [] $ nvPicPr
-                    , blipFill
-                    , spPr ]
+                    [ mknode "pic:pic" []
+                      [ nvPicPr
+                      , blipFill
+                      , spPr ] ]
   return [ mknode "w:r" [] $
       mknode "w:drawing" [] $
         mknode "wp:inline" []
