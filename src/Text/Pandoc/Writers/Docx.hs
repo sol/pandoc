@@ -65,7 +65,7 @@ data WriterState = WriterState{
        , stParaProperties :: [Element]
        , stFootnotes      :: [Element]
        , stSectionIds     :: [String]
-       , stExternalLinks  :: [String]
+       , stExternalLinks  :: M.Map String String
        , stImages         :: M.Map FilePath (String, B.ByteString)
        }
 
@@ -75,7 +75,7 @@ defaultWriterState = WriterState{
       , stParaProperties = []
       , stFootnotes      = []
       , stSectionIds     = []
-      , stExternalLinks  = []
+      , stExternalLinks  = M.empty
       , stImages         = M.empty
       }
 
@@ -109,10 +109,6 @@ writeDocx mbRefDocx opts doc = do
                        defaultWriterState
   (TOD epochtime _) <- getClockTime
   let relpath = "word/_rels/document.xml.rels"
-  let reldoc = case findEntryByPath relpath refArchive >>=
-                    parseXMLDoc . toString . fromEntry of
-                      Just d  -> d
-                      Nothing -> error $ relpath ++ "missing in reference docx"
   -- TODO modify reldoc by adding image and link info
   let imgs = M.elems $ stImages st
   let imgPath ident img = "media/" ++ ident ++
@@ -123,17 +119,20 @@ writeDocx mbRefDocx opts doc = do
                                   Nothing   -> ""
   let toImgRel (ident,img) =  mknode "Relationship" [("Type","http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"),("Id",ident),("Target",imgPath ident img)] ()
   let newrels = map toImgRel imgs
+  let reldoc = case findEntryByPath relpath refArchive >>=
+                    parseXMLDoc . toString . fromEntry of
+                      Just d  -> d
+                      Nothing -> error $ relpath ++ "missing in reference docx"
   let reldoc' = reldoc{ elContent = elContent reldoc ++ map Elem newrels }
-  let relEntry = toEntry relpath epochtime $ fromString $ ppTopElement reldoc'
   -- create entries for images
   let toImageEntry (ident,img) = toEntry ("word/" ++ imgPath ident img)
          epochtime img
   let imageEntries = map toImageEntry imgs
   -- NOW get list of external links and images from this, and do what's needed
-  -- with them
-  -- TODO use this to write word/_rels/document.xml.rels
-  -- for each link, we need:
-  -- <Relationship Id="link0"  Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"  Target="http://google.com/" TargetMode="External" />
+  let toLinkRel (src,ident) =  mknode "Relationship" [("Type","http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"),("Id",ident),("Target",src),("TargetMode","External") ] ()
+  let newrels' = map toLinkRel $ M.toList $ stExternalLinks st
+  let reldoc'' = reldoc' { elContent = elContent reldoc' ++ map Elem newrels' }
+  let relEntry = toEntry relpath epochtime $ fromString $ ppTopElement reldoc''
   let contentEntry = toEntry "word/document.xml" epochtime $ fromString $ ppTopElement newContents
   -- TODO add metadata, etc.
   let archive = foldr addEntryToArchive refArchive $
@@ -446,15 +445,18 @@ inlineToOpenXML opts (Note bs) = do
 inlineToOpenXML opts (Link txt ('#':xs,_)) = do
   contents <- withTextProp (rStyle "Hyperlink") $ inlinesToOpenXML opts txt
   return [ mknode "w:hyperlink" [("w:anchor",xs)] contents ]
+-- external link:
 inlineToOpenXML opts (Link txt (src,_)) = do
   contents <- withTextProp (rStyle "Hyperlink") $ inlinesToOpenXML opts txt
   extlinks <- gets stExternalLinks
-  return $
-    case elemIndex src extlinks of
-         Just ind -> [ mknode "w:hyperlink"
-                        [("r:id","link" ++ show ind)] contents ]
-         Nothing  -> [ mknode "w:hyperlink" [] contents ] -- shouldn't happen
--- see image-example.openxml.xml
+  ind <- case M.lookup src extlinks of
+            Just i   -> return i
+            Nothing  -> do
+              let i = "link" ++ show (M.size extlinks)
+              modify $ \st -> st{ stExternalLinks =
+                        M.insert src i extlinks }
+              return i
+  return [ mknode "w:hyperlink" [("r:id",ind)] contents ]
 inlineToOpenXML _ (Image _ (src, tit)) = do
   let ident = "image0" -- FIXME
   imgs <- gets stImages
@@ -474,7 +476,7 @@ inlineToOpenXML _ (Image _ (src, tit)) = do
                    mknode "a:picLocks" [("noChangeArrowheads","1"),("noChangeAspect","1")] ()
   let nvPicPr  = mknode "pic:nvPicPr" []
                   [ mknode "pic:cNvPr"
-                      [("descr",tit),("id","0"),("name","Picture")] ()
+                      [("descr",src),("id","0"),("name","Picture")] ()
                   , cNvPicPr ]
   let blipFill = mknode "pic:blipFill" []
                    [ mknode "a:blip" [("r:embed",ident)] ()
