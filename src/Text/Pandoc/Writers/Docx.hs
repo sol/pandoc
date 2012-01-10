@@ -505,7 +505,4 @@ inlineToOpenXML _ (Image _ (src, tit)) = do
           , mknode "wp:effectExtent" [("b","0"),("l","0"),("r","0"),("t","0")] ()
           , mknode "wp:docPr" [("descr",tit),("id","1"),("name","Picture")] ()
           , graphic ] ]
--- FIXME
-inlineToOpenXML opts x =
-  inlineToOpenXML opts (Str "INLINE")
 
