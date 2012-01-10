@@ -28,9 +28,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 Conversion of 'Pandoc' documents to docx.
 -}
 module Text.Pandoc.Writers.Docx ( writeDocx ) where
-import Data.IORef
-import Data.List ( isPrefixOf, nub, sort )
-import System.FilePath ( (</>), takeExtension )
+import Data.List ( intercalate )
+import System.FilePath ( (</>) )
 import qualified Data.ByteString.Lazy as B
 import qualified Data.Map as M
 import Data.ByteString.Lazy.UTF8 ( fromString, toString )
@@ -41,21 +40,15 @@ import Text.Pandoc.MIME ( getMimeType )
 import Text.Pandoc.Definition
 import Text.Pandoc.Generic
 import System.Directory
-import Control.Monad (liftM)
-import Network.URI ( unEscapeString )
-import Text.Pandoc.XML
-import Text.Pandoc.Pretty
 import Text.Pandoc.ImageSize
 import Text.Pandoc.Shared hiding (Element)
-import Text.Pandoc.Templates (renderTemplate)
 import Text.Pandoc.Readers.TeXMath
-import Data.List ( isPrefixOf, intercalate, isSuffixOf, sort, elemIndex, nub )
-import Data.Char ( toLower )
-import Text.Pandoc.Highlighting ( languages, languagesByExtension )
-import Text.Pandoc.Pretty
+import Text.Pandoc.Highlighting ( highlight )
+import Text.Highlighting.Kate.Definitions ()
 import Text.XML.Light
 import Text.TeXMath
 import Control.Monad.State
+import Text.Highlighting.Kate
 
 -- TODO: Remove use of Text.Pandoc.XML; instead use the xml module
 -- throughout.
@@ -108,7 +101,6 @@ writeDocx mbRefDocx opts doc = do
   (newContents, st) <- runStateT (writeOpenXML opts{writerWrapText = False} doc)
                        defaultWriterState
   (TOD epochtime _) <- getClockTime
-  let relpath = "word/_rels/document.xml.rels"
   -- TODO modify reldoc by adding image and link info
   let imgs = M.elems $ stImages st
   let imgPath ident img = "media/" ++ ident ++
@@ -119,6 +111,7 @@ writeDocx mbRefDocx opts doc = do
                                   Nothing   -> ""
   let toImgRel (ident,img) =  mknode "Relationship" [("Type","http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"),("Id",ident),("Target",imgPath ident img)] ()
   let newrels = map toImgRel imgs
+  let relpath = "word/_rels/document.xml.rels"
   let reldoc = case findEntryByPath relpath refArchive >>=
                     parseXMLDoc . toString . fromEntry of
                       Just d  -> d
@@ -134,23 +127,44 @@ writeDocx mbRefDocx opts doc = do
   let reldoc'' = reldoc' { elContent = elContent reldoc' ++ map Elem newrels' }
   let relEntry = toEntry relpath epochtime $ fromString $ ppTopElement reldoc''
   let contentEntry = toEntry "word/document.xml" epochtime $ fromString $ ppTopElement newContents
+  -- styles
+  let newstyles = styleToOpenXml $ writerHighlightStyle opts
+  let stylepath = "word/styles.xml"
+  let styledoc = case findEntryByPath stylepath refArchive >>=
+                      parseXMLDoc . toString . fromEntry of
+                        Just d  -> d
+                        Nothing -> error $ stylepath ++ "missing in reference docx"
+  let styledoc' = styledoc{ elContent = elContent styledoc ++ map Elem newstyles }
+  let styleEntry = toEntry stylepath epochtime $ fromString $ ppTopElement styledoc'
   -- TODO add metadata, etc.
   let archive = foldr addEntryToArchive refArchive $
-                  contentEntry : relEntry : imageEntries
+                  contentEntry : relEntry : styleEntry : imageEntries
   return $ fromArchive archive
 
-{-
-transformPic :: FilePath -> IORef [Entry] -> Inline -> IO Inline
-transformPic sourceDir entriesRef (Image lab (src,tit)) = do
-  let src' = unEscapeString src
-  entries <- readIORef entriesRef
-  let newsrc = "Pictures/" ++ show (length entries) ++ takeExtension src'
-  catch (readEntry [] (sourceDir </> src') >>= \entry ->
-           modifyIORef entriesRef (entry{ eRelativePath = newsrc } :) >>
-           return (Image lab (newsrc, tit)))
-        (\_ -> return (Emph lab))
-transformPic _ _ x = return x
--}
+styleToOpenXml :: Style -> [Element]
+styleToOpenXml style = map toStyle alltoktypes
+  where alltoktypes = enumFromTo KeywordTok NormalTok
+        toStyle toktype = mknode "w:style" [("w:type","character"),
+                           ("w:customStyle","1"),("w:styleId",show toktype)]
+                             [ mknode "w:name" [("w:val",show toktype)] ()
+                             , mknode "w:basedOn" [("w:val","VerbatimChar")] ()
+                             , mknode "w:rPr" [] $
+                               [ mknode "w:color" [("w:val",tokCol toktype)] ()
+                                 | tokCol toktype /= "auto" ] ++
+                               [ mknode "w:shd" [("w:val","pct40"),("w:fill",tokBg toktype)] ()
+                                 | tokBg toktype /= "auto" ] ++
+                               [ mknode "w:b" [] () | tokFeature tokenBold toktype ] ++
+                               [ mknode "w:i" [] () | tokFeature tokenItalic toktype ] ++
+                               [ mknode "w:u" [] () | tokFeature tokenUnderline toktype ]
+                             ]
+        tokStyles = tokenStyles style
+        tokFeature f toktype = maybe False f $ lookup toktype tokStyles
+        tokCol toktype = maybe "auto" (drop 1 . fromColor)
+                         $ (tokenColor =<< lookup toktype tokStyles)
+                           `mplus` defaultColor style
+        tokBg toktype = maybe "auto" (drop 1 . fromColor)
+                         $ (tokenBackground =<< lookup toktype tokStyles)
+                           `mplus` backgroundColor style 
 
 -- | Convert Pandoc document to string in OpenXML format.
 writeOpenXML :: WriterOptions -> Pandoc -> WS Element
@@ -381,13 +395,16 @@ withParaProp d p = do
   popParaProp
   return res
 
+formattedString :: String -> WS Element
+formattedString str = do
+  props <- getTextProps
+  return $ mknode "w:r" [] $
+             props ++
+             [ mknode "w:t" [("xml:space","preserve")] str ]
+
 -- | Convert an inline element to OpenXML.
 inlineToOpenXML :: WriterOptions -> Inline -> WS [Element]
-inlineToOpenXML _ (Str str) = do
-  props <- getTextProps
-  return [ mknode "w:r" [] $
-             props ++
-             [ mknode "w:t" [("xml:space","preserve")] str ] ]
+inlineToOpenXML _ (Str str) = (:[]) `fmap` formattedString str
 inlineToOpenXML opts Space = inlineToOpenXML opts (Str " ")
 inlineToOpenXML opts (Strong lst) =
   withTextProp (mknode "w:b" [] ()) $ inlinesToOpenXML opts lst
@@ -422,8 +439,17 @@ inlineToOpenXML opts (Math t str) =
                   then DisplayInline
                   else DisplayBlock
 inlineToOpenXML opts (Cite _ lst) = inlinesToOpenXML opts lst
-inlineToOpenXML opts (Code _ str) =
-  withTextProp (rStyle "VerbatimChar") $ inlineToOpenXML opts (Str str)
+inlineToOpenXML opts (Code attrs str) =
+  withTextProp (rStyle "VerbatimChar")
+  $ case highlight formatOpenXML attrs str of
+         Nothing  -> (:[]) `fmap` formattedString str
+         Just h   -> return h
+     where formatOpenXML _fmtOpts = map toHlTok .
+                                    intercalate [(NormalTok,"\n")]
+           toHlTok (toktype,tok) = mknode "w:r" []
+                                     [ mknode "w:rPr" []
+                                       [ rStyle $ show toktype ]
+                                     , mknode "w:t" [("xml:space","preserve")] tok ]
 inlineToOpenXML opts (Note bs) = do
   notes <- gets stFootnotes
   let notenum = length notes + 1
@@ -458,7 +484,6 @@ inlineToOpenXML opts (Link txt (src,_)) = do
               return i
   return [ mknode "w:hyperlink" [("r:id",ind)] contents ]
 inlineToOpenXML _ (Image _ (src, tit)) = do
-  let ident = "image0" -- FIXME
   imgs <- gets stImages
   (ident,size) <- case M.lookup src imgs of
                        Just (i,img) -> return (i, imageSize img)
