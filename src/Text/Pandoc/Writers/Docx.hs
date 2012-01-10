@@ -469,15 +469,16 @@ inlineToOpenXML _ (Image _ (src, tit)) = do
                             stImages = M.insert src (ident',img) $ stImages st }
                          return (ident',size')
   let (xpix,ypix) = maybe (100,100) id size
-  let (xemu,yemu) = (xpix * 914400 `div` 96, ypix * 914400 `div` 96) -- 96 dpi
+  let (xemu,yemu) = (xpix * 9525, ypix * 9525)
   let cNvPicPr = mknode "pic:cNvPicPr" [] $
                    mknode "a:picLocks" [("noChangeArrowheads","1"),("noChangeAspect","1")] ()
   let nvPicPr  = mknode "pic:nvPicPr" []
                   [ mknode "pic:cNvPr"
                       [("descr",tit),("id","0"),("name","Picture")] ()
                   , cNvPicPr ]
-  let blipFill = mknode "pic:blipFill" [] $
-                    mknode "a:blip" [("r:embed",ident)] ()
+  let blipFill = mknode "pic:blipFill" []
+                   [ mknode "a:blip" [("r:embed",ident)] ()
+                   , mknode "a:stretch" [] $ mknode "a:fillRect" [] () ]
   let xfrm =    mknode "a:xfrm" []
                   [ mknode "a:off" [("x","0"),("y","0")] ()
                   , mknode "a:ext" [("cx",show xemu),("cy",show yemu)] () ]
