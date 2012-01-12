@@ -44,7 +44,7 @@ import Text.Pandoc.ImageSize
 import Text.Pandoc.Shared hiding (Element)
 import Text.Pandoc.Readers.TeXMath
 import Text.Pandoc.Highlighting ( highlight )
-import Text.Highlighting.Kate.Definitions ()
+import Text.Highlighting.Kate.Types ()
 import Text.XML.Light
 import Text.TeXMath
 import Control.Monad.State
@@ -142,7 +142,7 @@ writeDocx mbRefDocx opts doc = do
   return $ fromArchive archive
 
 styleToOpenXml :: Style -> [Element]
-styleToOpenXml style = map toStyle alltoktypes
+styleToOpenXml style = parStyle : map toStyle alltoktypes
   where alltoktypes = enumFromTo KeywordTok NormalTok
         toStyle toktype = mknode "w:style" [("w:type","character"),
                            ("w:customStyle","1"),("w:styleId",show toktype)]
@@ -164,7 +164,18 @@ styleToOpenXml style = map toStyle alltoktypes
                            `mplus` defaultColor style
         tokBg toktype = maybe "auto" (drop 1 . fromColor)
                          $ (tokenBackground =<< lookup toktype tokStyles)
-                           `mplus` backgroundColor style 
+                           `mplus` backgroundColor style
+        parStyle = mknode "w:style" [("w:type","paragraph"),
+                           ("w:customStyle","1"),("w:styleId","SourceCode")]
+                             [ mknode "w:name" [("w:val","Source Code")] ()
+                             , mknode "w:basedOn" [("w:val","Normal")] ()
+                             , mknode "w:link" [("w:val","VerbatimChar")] ()
+                             , mknode "w:pPr" [] $
+                               [ mknode "w:color" [("w:val",tokCol NormalTok)] ()
+                                 | tokCol NormalTok /= "auto" ] ++
+                               [ mknode "w:shd" [("w:val","pct40"),("w:fill",tokBg NormalTok)] ()
+                                 | tokBg NormalTok /= "auto" ]
+                             ]
 
 -- | Convert Pandoc document to string in OpenXML format.
 writeOpenXML :: WriterOptions -> Pandoc -> WS Element
@@ -273,9 +284,12 @@ blockToOpenXML _ (RawBlock format str)
   | otherwise           = return []
 blockToOpenXML opts (BlockQuote blocks) =
   withParaProp (pStyle "BlockQuote") $ blocksToOpenXML opts blocks
+blockToOpenXML opts (CodeBlock attrs str) =
+  withParaProp (pStyle "Source Code") $ blockToOpenXML opts
+                                      $ Para [Code attrs str]
+
 blockToOpenXML opts x =
   blockToOpenXML opts (Para [Str "BLOCK"])
-
 {-
 blockToOpenXML _ (CodeBlock (_,classes,_) str) =
   text ("<programlisting" ++ lang ++ ">") <> cr <>
@@ -444,8 +458,8 @@ inlineToOpenXML opts (Code attrs str) =
   $ case highlight formatOpenXML attrs str of
          Nothing  -> (:[]) `fmap` formattedString str
          Just h   -> return h
-     where formatOpenXML _fmtOpts = map toHlTok .
-                                    intercalate [(NormalTok,"\n")]
+     where formatOpenXML _fmtOpts = intercalate [mknode "w:br" [] ()] .
+                                    map (map toHlTok)
            toHlTok (toktype,tok) = mknode "w:r" []
                                      [ mknode "w:rPr" []
                                        [ rStyle $ show toktype ]
