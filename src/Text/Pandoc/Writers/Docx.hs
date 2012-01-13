@@ -151,7 +151,7 @@ styleToOpenXml style = parStyle : map toStyle alltoktypes
                              , mknode "w:rPr" [] $
                                [ mknode "w:color" [("w:val",tokCol toktype)] ()
                                  | tokCol toktype /= "auto" ] ++
-                               [ mknode "w:shd" [("w:val","pct40"),("w:fill",tokBg toktype)] ()
+                               [ mknode "w:shd" [("w:val","clear"),("w:fill",tokBg toktype)] ()
                                  | tokBg toktype /= "auto" ] ++
                                [ mknode "w:b" [] () | tokFeature tokenBold toktype ] ++
                                [ mknode "w:i" [] () | tokFeature tokenItalic toktype ] ++
@@ -170,10 +170,8 @@ styleToOpenXml style = parStyle : map toStyle alltoktypes
                              [ mknode "w:name" [("w:val","Source Code")] ()
                              , mknode "w:basedOn" [("w:val","Normal")] ()
                              , mknode "w:link" [("w:val","VerbatimChar")] ()
-                             , mknode "w:pPr" [] $
-                               [ mknode "w:color" [("w:val",tokCol NormalTok)] ()
-                                 | tokCol NormalTok /= "auto" ] ++
-                               [ mknode "w:shd" [("w:val","pct40"),("w:fill",tokBg NormalTok)] ()
+                             , mknode "w:pPr" []
+                               [ mknode "w:shd" [("w:val","clear"),("w:fill",tokBg NormalTok)] ()
                                  | tokBg NormalTok /= "auto" ]
                              ]
 
@@ -285,8 +283,8 @@ blockToOpenXML _ (RawBlock format str)
 blockToOpenXML opts (BlockQuote blocks) =
   withParaProp (pStyle "BlockQuote") $ blocksToOpenXML opts blocks
 blockToOpenXML opts (CodeBlock attrs str) =
-  withParaProp (pStyle "Source Code") $ blockToOpenXML opts
-                                      $ Para [Code attrs str]
+  withParaProp (pStyle "SourceCode") $ blockToOpenXML opts
+                                     $ Para [Code attrs str]
 
 blockToOpenXML opts x =
   blockToOpenXML opts (Para [Str "BLOCK"])
