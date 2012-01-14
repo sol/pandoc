@@ -171,10 +171,10 @@ styleToOpenXml style = parStyle : map toStyle alltoktypes
                              , mknode "w:basedOn" [("w:val","Normal")] ()
                              , mknode "w:link" [("w:val","VerbatimChar")] ()
                              , mknode "w:pPr" []
-                               [ mknode "w:shd" [("w:val","clear"),("w:fill",tokBg NormalTok)] ()
-                                 | tokBg NormalTok /= "auto" ]
+                               $ mknode "w:wordWrap" [("w:val","off")] ()
+                               : ( maybe [] (\col -> [mknode "w:shd" [("w:val","clear"),("w:fill",drop 1 $ fromColor col)] ()])
+                                 $ backgroundColor style )
                              ]
-
 -- | Convert Pandoc document to string in OpenXML format.
 writeOpenXML :: WriterOptions -> Pandoc -> WS Element
 writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) = do
@@ -282,39 +282,29 @@ blockToOpenXML _ (RawBlock format str)
   | otherwise           = return []
 blockToOpenXML opts (BlockQuote blocks) =
   withParaProp (pStyle "BlockQuote") $ blocksToOpenXML opts blocks
-blockToOpenXML opts (CodeBlock attrs str) = do
-  contents <- withParaProp (pStyle "SourceCode")
-              $ blockToOpenXML opts $ Para [Code attrs str]
-  linenums <- withParaProp (pStyle "SourceCode")
-              $ blockToOpenXML opts $ Para [Code attrs $ unlines $ map show [1..(length $ lines str)]]
-  return [ mknode "w:tbl" []
-           [ mknode "w:tblPr" [] ()
-           , mknode "w:tblGrid" []
-             [ mknode "w:gridCol" [("w:w","100")] ()
-             , mknode "w:gridCol" [("w:w","12120")] () ]
-           , mknode "w:tr" []
-             [ mknode "w:tc" []
-               (mknode "w:tcPr" [] () :  linenums)
-             , mknode "w:tc" []
-               (mknode "w:tcPr" [] () : contents)
-             ]
-           ]
-         ]
+blockToOpenXML opts (CodeBlock attrs str) =
+  withParaProp (pStyle "SourceCode") $ blockToOpenXML opts $ Para [Code attrs str]
+blockToOpenXML _ HorizontalRule = return [
+  mknode "w:p" [] $ mknode "w:r" [] $ mknode "w:pict" []
+    $ mknode "v:rect" [("style","width:0;height:1.5pt"),
+                       ("o:hralign","center"),
+                       ("o:hrstd","t"),("o:hr","t")] () ]
+{-      <w:r>
+        <w:rPr>
+          <w:rFonts w:eastAsia="Times New Roman"
+          w:cs="Times New Roman" />
+        </w:rPr>
+        <w:pict>
+          <v:rect id="_x0000_i1025" style="width:0;height:1.5pt"
+          o:hralign="center" o:hrstd="t" o:hr="t" fillcolor="#aaa"
+          stroked="f" />
+        </w:pict>
+      </w:r>
+-}
+
 blockToOpenXML opts x =
   blockToOpenXML opts (Para [Str "BLOCK"])
 {-
-blockToOpenXML _ (CodeBlock (_,classes,_) str) =
-  text ("<programlisting" ++ lang ++ ">") <> cr <>
-     flush (text (escapeStringForXML str) <> cr <> text "</programlisting>")
-    where lang  = if null langs
-                     then ""
-                     else " language=\"" ++ escapeStringForXML (head langs) ++
-                          "\""
-          isLang l    = map toLower l `elem` map (map toLower) languages
-          langsFrom s = if isLang s
-                           then [s]
-                           else languagesByExtension . map toLower $ s
-          langs       = concatMap langsFrom classes
 blockToOpenXML opts (BulletList lst) =
   mknode "itemizedlist" [] $ listItemsToOpenXML opts lst
 blockToOpenXML _ (OrderedList _ []) = empty
@@ -335,7 +325,6 @@ blockToOpenXML opts (OrderedList (start, numstyle, _) (first:rest)) =
   in  mknode "orderedlist" attribs items
 blockToOpenXML opts (DefinitionList lst) =
   mknode "variablelist" [] $ deflistItemsToOpenXML opts lst
-blockToOpenXML _ HorizontalRule = empty -- not semantic
 blockToOpenXML opts (Table caption aligns widths headers rows) =
   let captionDoc   = if null caption
                         then empty
