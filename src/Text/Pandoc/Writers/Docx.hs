@@ -213,11 +213,6 @@ blocksToOpenXML :: WriterOptions -> [Block] -> WS [Element]
 blocksToOpenXML opts bls = concat `fmap` mapM (blockToOpenXML opts) bls
 
 {-
--- | Auxiliary function to convert Plain block to Para. DO WE NEED THIS TODO?
-plainToPara :: Block -> Block
-plainToPara (Plain x) = Para x
-plainToPara x         = x
-
 -- | Convert a list of pairs of terms and definitions into a list of
 -- OpenXML varlistentrys.
 deflistItemsToOpenXML :: WriterOptions -> [([Inline],[[Block]])] -> Doc
@@ -289,19 +284,6 @@ blockToOpenXML _ HorizontalRule = return [
     $ mknode "v:rect" [("style","width:0;height:1.5pt"),
                        ("o:hralign","center"),
                        ("o:hrstd","t"),("o:hr","t")] () ]
-{-      <w:r>
-        <w:rPr>
-          <w:rFonts w:eastAsia="Times New Roman"
-          w:cs="Times New Roman" />
-        </w:rPr>
-        <w:pict>
-          <v:rect id="_x0000_i1025" style="width:0;height:1.5pt"
-          o:hralign="center" o:hrstd="t" o:hr="t" fillcolor="#aaa"
-          stroked="f" />
-        </w:pict>
-      </w:r>
--}
-
 blockToOpenXML opts x =
   blockToOpenXML opts (Para [Str "BLOCK"])
 {-
