@@ -282,10 +282,24 @@ blockToOpenXML _ (RawBlock format str)
   | otherwise           = return []
 blockToOpenXML opts (BlockQuote blocks) =
   withParaProp (pStyle "BlockQuote") $ blocksToOpenXML opts blocks
-blockToOpenXML opts (CodeBlock attrs str) =
-  withParaProp (pStyle "SourceCode") $ blockToOpenXML opts
-                                     $ Para [Code attrs str]
-
+blockToOpenXML opts (CodeBlock attrs str) = do
+  contents <- withParaProp (pStyle "SourceCode")
+              $ blockToOpenXML opts $ Para [Code attrs str]
+  linenums <- withParaProp (pStyle "SourceCode")
+              $ blockToOpenXML opts $ Para [Code attrs $ unlines $ map show [1..(length $ lines str)]]
+  return [ mknode "w:tbl" []
+           [ mknode "w:tblPr" [] ()
+           , mknode "w:tblGrid" []
+             [ mknode "w:gridCol" [("w:w","100")] ()
+             , mknode "w:gridCol" [("w:w","12120")] () ]
+           , mknode "w:tr" []
+             [ mknode "w:tc" []
+               (mknode "w:tcPr" [] () :  linenums)
+             , mknode "w:tc" []
+               (mknode "w:tcPr" [] () : contents)
+             ]
+           ]
+         ]
 blockToOpenXML opts x =
   blockToOpenXML opts (Para [Str "BLOCK"])
 {-
