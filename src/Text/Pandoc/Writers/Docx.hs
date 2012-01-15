@@ -492,8 +492,9 @@ inlineToOpenXML _ (Image _ (src, tit)) = do
                          modify $ \st -> st{
                             stImages = M.insert src (ident',img) $ stImages st }
                          return (ident',size')
-  let (xpix,ypix) = maybe (100,100) id size
-  let (xemu,yemu) = (xpix * 9525, ypix * 9525)
+  let (xpt,ypt) = maybe (120,120) sizeInPoints size
+  -- 12700 emu = 1 pt
+  let (xemu,yemu) = (xpt * 12700, ypt * 12700)
   let cNvPicPr = mknode "pic:cNvPicPr" [] $
                    mknode "a:picLocks" [("noChangeArrowheads","1"),("noChangeAspect","1")] ()
   let nvPicPr  = mknode "pic:nvPicPr" []
