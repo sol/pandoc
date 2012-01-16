@@ -285,6 +285,11 @@ blockToOpenXML _ HorizontalRule = return [
                        ("o:hralign","center"),
                        ("o:hrstd","t"),("o:hr","t")] () ]
 blockToOpenXML opts (Table caption aligns widths headers rows) = do
+  let captionStr = stringify caption
+  caption' <- if null caption
+                 then return []
+                 else withParaProp (pStyle "TableCaption")
+                      $ blockToOpenXML opts (Para caption)
   let alignmentFor al = mknode "w:jc" [("w:val",alignmentToString al)] ()
   let cellToOpenXML opts (al, cell) = withParaProp (alignmentFor al)
                                     $ blocksToOpenXML opts cell
@@ -292,8 +297,9 @@ blockToOpenXML opts (Table caption aligns widths headers rows) = do
   rows' <- mapM (\cells -> mapM (cellToOpenXML opts) $ zip aligns cells)
            $ rows
   let borderProps = mknode "w:tcPr" []
-                  $ mknode "w:tcBorders" []
-                  $ mknode "w:bottom" [("w:val","single")] ()
+                    [ mknode "w:tcBorders" []
+                      $ mknode "w:bottom" [("w:val","single")] ()
+                    , mknode "w:vAlign" [("w:val","bottom")] () ]
   let mkcell border contents = mknode "w:tc" []
                             $ [ borderProps | border ] ++
                             if null contents
@@ -303,17 +309,19 @@ blockToOpenXML opts (Table caption aligns widths headers rows) = do
   let textwidth = 7920  -- 5.5 in in twips, 1/20 pt
   let mkgridcol w = mknode "w:gridCol"
                        [("w:w", show $ floor $ textwidth * w)] ()
-  return [ mknode "w:tbl" []
-           ( mknode "w:tblPr" []
-             ()
-           : mknode "w:tblGrid" []
-             (if all (==0) widths
-                 then []
-                 else map mkgridcol widths)
-           : mkrow True headers'
-           : map (mkrow False) rows'
-           )
-         ]
+  return $
+    [ mknode "w:tbl" []
+      ( mknode "w:tblPr" []
+        [ mknode "w:tblCaption" [("w:val", captionStr)] ()
+          | not (null caption) ]
+      : mknode "w:tblGrid" []
+        (if all (==0) widths
+            then []
+            else map mkgridcol widths)
+      : [ mkrow True headers' | not (all null headers) ] ++
+      map (mkrow False) rows'
+      )
+    ] ++ caption'
 --   let captionDoc   = if null caption
 --                         then empty
 --                         else mknode "title" []
