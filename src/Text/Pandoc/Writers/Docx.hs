@@ -285,21 +285,33 @@ blockToOpenXML _ HorizontalRule = return [
                        ("o:hralign","center"),
                        ("o:hrstd","t"),("o:hr","t")] () ]
 blockToOpenXML opts (Table caption aligns widths headers rows) = do
-  headers' <- mapM (blocksToOpenXML opts) headers
-  rows' <- mapM (mapM (blocksToOpenXML opts)) rows
-  let mkcell al wd contents = mknode "w:tc" []
-                            $ if null contents
-                                 then [mknode "w:p" [] ()]
-                                 else contents
-  let mkrow als ws cells = mknode "w:tr" []
-                         $ zipWith3 mkcell als ws cells
+  let alignmentFor al = mknode "w:jc" [("w:val",alignmentToString al)] ()
+  let cellToOpenXML opts (al, cell) = withParaProp (alignmentFor al)
+                                    $ blocksToOpenXML opts cell
+  headers' <- mapM (cellToOpenXML opts) $ zip aligns headers
+  rows' <- mapM (\cells -> mapM (cellToOpenXML opts) $ zip aligns cells)
+           $ rows
+  let borderProps = mknode "w:tcPr" []
+                  $ mknode "w:tcBorders" []
+                  $ mknode "w:bottom" [("w:val","single")] ()
+  let mkcell border contents = mknode "w:tc" []
+                            $ [ borderProps | border ] ++
+                            if null contents
+                               then [mknode "w:p" [] ()]
+                               else contents
+  let mkrow border cells = mknode "w:tr" [] $ map (mkcell border) cells
+  let textwidth = 7920  -- 5.5 in in twips, 1/20 pt
+  let mkgridcol w = mknode "w:gridCol"
+                       [("w:w", show $ floor $ textwidth * w)] ()
   return [ mknode "w:tbl" []
            ( mknode "w:tblPr" []
              ()
            : mknode "w:tblGrid" []
-             ()
-           : mkrow aligns widths headers'
-           : map (mkrow aligns widths) rows'
+             (if all (==0) widths
+                 then []
+                 else map mkgridcol widths)
+           : mkrow True headers'
+           : map (mkrow False) rows'
            )
          ]
 --   let captionDoc   = if null caption
@@ -322,6 +334,16 @@ blockToOpenXML opts (Table caption aligns widths headers rows) = do
 --          coltags $$ head' $$ body')]
 blockToOpenXML opts x =
   blockToOpenXML opts (Para [Str "BLOCK"])
+
+alignmentToString :: Alignment -> [Char]
+alignmentToString alignment = case alignment of
+                                 AlignLeft -> "left"
+                                 AlignRight -> "right"
+                                 AlignCenter -> "center"
+                                 AlignDefault -> "left"
+
+
+
 {-
 blockToOpenXML opts (BulletList lst) =
   mknode "itemizedlist" [] $ listItemsToOpenXML opts lst
@@ -343,15 +365,10 @@ blockToOpenXML opts (OrderedList (start, numstyle, _) (first:rest)) =
   in  mknode "orderedlist" attribs items
 blockToOpenXML opts (DefinitionList lst) =
   mknode "variablelist" [] $ deflistItemsToOpenXML opts lst
+
+
 -}
 {-
-alignmentToString :: Alignment -> [Char]
-alignmentToString alignment = case alignment of
-                                 AlignLeft -> "left"
-                                 AlignRight -> "right"
-                                 AlignCenter -> "center"
-                                 AlignDefault -> "left"
-
 tableRowToOpenXML :: WriterOptions
                   -> [[Block]]
                   -> Doc
