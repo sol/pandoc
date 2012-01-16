@@ -284,6 +284,42 @@ blockToOpenXML _ HorizontalRule = return [
     $ mknode "v:rect" [("style","width:0;height:1.5pt"),
                        ("o:hralign","center"),
                        ("o:hrstd","t"),("o:hr","t")] () ]
+blockToOpenXML opts (Table caption aligns widths headers rows) = do
+  headers' <- mapM (blocksToOpenXML opts) headers
+  rows' <- mapM (mapM (blocksToOpenXML opts)) rows
+  let mkcell al wd contents = mknode "w:tc" []
+                            $ if null contents
+                                 then [mknode "w:p" [] ()]
+                                 else contents
+  let mkrow als ws cells = mknode "w:tr" []
+                         $ zipWith3 mkcell als ws cells
+  return [ mknode "w:tbl" []
+           ( mknode "w:tblPr" []
+             ()
+           : mknode "w:tblGrid" []
+             ()
+           : mkrow aligns widths headers'
+           : map (mkrow aligns widths) rows'
+           )
+         ]
+--   let captionDoc   = if null caption
+--                         then empty
+--                         else mknode "title" []
+--                               (inlinesToOpenXML opts caption)
+--       tableType    = if isEmpty captionDoc then "informaltable" else "table"
+--       percent w    = show (truncate (100*w) :: Integer) ++ "*"
+--       coltags = vcat $ zipWith (\w al -> mknode "colspec"
+--                        ([("colwidth", percent w) | w > 0] ++
+--                         [("align", alignmentToString al)]) ()) widths aligns
+--       head' = if all null headers
+--                  then empty
+--                  else mknode "thead" [] $
+--                          tableRowToOpenXML opts headers
+--       body' = mknode "tbody" [] $
+--               vcat $ map (tableRowToOpenXML opts) rows
+--   in  mknode tableType [] [captionDoc,
+--         (mknode "tgroup" [("cols", show (length headers))] $
+--          coltags $$ head' $$ body')]
 blockToOpenXML opts x =
   blockToOpenXML opts (Para [Str "BLOCK"])
 {-
@@ -307,25 +343,6 @@ blockToOpenXML opts (OrderedList (start, numstyle, _) (first:rest)) =
   in  mknode "orderedlist" attribs items
 blockToOpenXML opts (DefinitionList lst) =
   mknode "variablelist" [] $ deflistItemsToOpenXML opts lst
-blockToOpenXML opts (Table caption aligns widths headers rows) =
-  let captionDoc   = if null caption
-                        then empty
-                        else mknode "title" []
-                              (inlinesToOpenXML opts caption)
-      tableType    = if isEmpty captionDoc then "informaltable" else "table"
-      percent w    = show (truncate (100*w) :: Integer) ++ "*"
-      coltags = vcat $ zipWith (\w al -> mknode "colspec"
-                       ([("colwidth", percent w) | w > 0] ++
-                        [("align", alignmentToString al)]) ()) widths aligns
-      head' = if all null headers
-                 then empty
-                 else mknode "thead" [] $
-                         tableRowToOpenXML opts headers
-      body' = mknode "tbody" [] $
-              vcat $ map (tableRowToOpenXML opts) rows
-  in  mknode tableType [] [captionDoc,
-        (mknode "tgroup" [("cols", show (length headers))] $
-         coltags $$ head' $$ body')]
 -}
 {-
 alignmentToString :: Alignment -> [Char]
