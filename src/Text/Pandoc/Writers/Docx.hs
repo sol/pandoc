@@ -50,9 +50,6 @@ import Text.TeXMath
 import Control.Monad.State
 import Text.Highlighting.Kate
 
--- TODO: Remove use of Text.Pandoc.XML; instead use the xml module
--- throughout.
-
 data WriterState = WriterState{
          stTextProperties :: [Element]
        , stParaProperties :: [Element]
@@ -61,7 +58,13 @@ data WriterState = WriterState{
        , stExternalLinks  :: M.Map String String
        , stImages         :: M.Map FilePath (String, B.ByteString)
        , stListLevel      :: Int
-       , stListNumId      :: Int }
+       , stListMarker     :: ListMarker
+       }
+
+data ListMarker = NoMarker
+                | BulletMarker
+                | NumberMarker ListNumberStyle ListNumberDelim Int
+                deriving (Show, Read, Eq)
 
 defaultWriterState :: WriterState
 defaultWriterState = WriterState{
@@ -72,7 +75,7 @@ defaultWriterState = WriterState{
       , stExternalLinks  = M.empty
       , stImages         = M.empty
       , stListLevel      = -1 -- not in a list
-      , stListNumId      = 0  -- no numbering 
+      , stListMarker     = NoMarker
       }
 
 type WS a = StateT WriterState IO a
@@ -326,7 +329,10 @@ blockToOpenXML opts (Table caption aligns widths headers rows) = do
       )
     ] ++ caption'
 blockToOpenXML opts (BulletList lst) = asList
-  $ withParaProp (pStyle "ListBullet")
+  $ withMarker BulletMarker
+  $ concat `fmap` mapM (blocksToOpenXML opts) lst
+blockToOpenXML opts (OrderedList (start, numstyle, numdelim) lst) = asList
+  $ withMarker (NumberMarker DefaultStyle DefaultDelim 1)
   $ concat `fmap` mapM (blocksToOpenXML opts) lst
 blockToOpenXML opts x =
   blockToOpenXML opts (Para [Str "BLOCK"])
@@ -382,6 +388,14 @@ tableItemToOpenXML opts item =
 inlinesToOpenXML :: WriterOptions -> [Inline] -> WS [Element]
 inlinesToOpenXML opts lst = concat `fmap` mapM (inlineToOpenXML opts) lst
 
+withMarker :: ListMarker -> WS a -> WS a
+withMarker m p = do
+  origMarker <- gets stListMarker
+  modify $ \st -> st{ stListMarker = m }
+  result <- p
+  modify $ \st -> st{ stListMarker = origMarker }
+  return result
+
 asList :: WS a -> WS a
 asList p = do
   origListLevel <- gets stListLevel
@@ -414,14 +428,16 @@ getParaProps :: WS [Element]
 getParaProps = do
   props <- gets stParaProperties
   listLevel <- gets stListLevel
-  -- numid <- gets stListNumId
-  let listPr = if listLevel >= 0 -- || numid > 0
-                  then [ mknode "w:pStyle" [("w:val","ListParagraph")] ()
-                       , mknode "w:numPr" []
-                         [ mknode "w:ilvl" [("w:val",show listLevel)] ()
-                         -- , mknode "w:numId" [("w:val",show numid)] ()
-                         ]
-                        ]
+  listMarker <- gets stListMarker
+  let styles = case listMarker of
+                     NoMarker     -> []
+                     BulletMarker -> ["ListBullet"]
+                     NumberMarker _ _ _ -> ["ListNumber"]
+  let listPr = if listLevel >= 0
+                  then [ mknode "w:numPr" []
+                         [ mknode "w:ilvl" [("w:val",show listLevel)] () ]
+                       ] ++
+                       map (\sty -> mknode "w:pStyle" [("w:val",sty)] ()) styles
                   else []
   return $ case props ++ listPr of
                 [] -> []
