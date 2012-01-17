@@ -325,24 +325,8 @@ blockToOpenXML opts (Table caption aligns widths headers rows) = do
       map (mkrow False) rows'
       )
     ] ++ caption'
---   let captionDoc   = if null caption
---                         then empty
---                         else mknode "title" []
---                               (inlinesToOpenXML opts caption)
---       tableType    = if isEmpty captionDoc then "informaltable" else "table"
---       percent w    = show (truncate (100*w) :: Integer) ++ "*"
---       coltags = vcat $ zipWith (\w al -> mknode "colspec"
---                        ([("colwidth", percent w) | w > 0] ++
---                         [("align", alignmentToString al)]) ()) widths aligns
---       head' = if all null headers
---                  then empty
---                  else mknode "thead" [] $
---                          tableRowToOpenXML opts headers
---       body' = mknode "tbody" [] $
---               vcat $ map (tableRowToOpenXML opts) rows
---   in  mknode tableType [] [captionDoc,
---         (mknode "tgroup" [("cols", show (length headers))] $
---          coltags $$ head' $$ body')]
+blockToOpenXML opts (BulletList lst) = asList 1 $
+  concat `fmap` mapM (blocksToOpenXML opts) lst
 blockToOpenXML opts x =
   blockToOpenXML opts (Para [Str "BLOCK"])
 
