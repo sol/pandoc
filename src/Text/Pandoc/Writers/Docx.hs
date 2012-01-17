@@ -440,16 +440,16 @@ withParaProp d p = do
   popParaProp
   return res
 
-formattedString :: String -> WS Element
+formattedString :: String -> WS [Element]
 formattedString str = do
   props <- getTextProps
-  return $ mknode "w:r" [] $
+  return [ mknode "w:r" [] $
              props ++
-             [ mknode "w:t" [("xml:space","preserve")] str ]
+             [ mknode "w:t" [("xml:space","preserve")] str ] ]
 
 -- | Convert an inline element to OpenXML.
 inlineToOpenXML :: WriterOptions -> Inline -> WS [Element]
-inlineToOpenXML _ (Str str) = (:[]) `fmap` formattedString str
+inlineToOpenXML _ (Str str) = formattedString str
 inlineToOpenXML opts Space = inlineToOpenXML opts (Str " ")
 inlineToOpenXML opts (Strong lst) =
   withTextProp (mknode "w:b" [] ()) $ inlinesToOpenXML opts lst
@@ -487,7 +487,8 @@ inlineToOpenXML opts (Cite _ lst) = inlinesToOpenXML opts lst
 inlineToOpenXML opts (Code attrs str) =
   withTextProp (rStyle "VerbatimChar")
   $ case highlight formatOpenXML attrs str of
-         Nothing  -> (:[]) `fmap` formattedString str
+         Nothing  -> intercalate [mknode "w:br" [] ()]
+                     `fmap` (mapM formattedString $ lines str)
          Just h   -> return h
      where formatOpenXML _fmtOpts = intercalate [mknode "w:br" [] ()] .
                                     map (map toHlTok)
