@@ -60,7 +60,8 @@ data WriterState = WriterState{
        , stSectionIds     :: [String]
        , stExternalLinks  :: M.Map String String
        , stImages         :: M.Map FilePath (String, B.ByteString)
-       }
+       , stListLevel      :: Int
+       , stListNumId      :: Int }
 
 defaultWriterState :: WriterState
 defaultWriterState = WriterState{
@@ -70,6 +71,8 @@ defaultWriterState = WriterState{
       , stSectionIds     = []
       , stExternalLinks  = M.empty
       , stImages         = M.empty
+      , stListLevel      = -1 -- not in a list
+      , stListNumId      = 0  -- no numbering 
       }
 
 type WS a = StateT WriterState IO a
@@ -394,6 +397,15 @@ tableItemToOpenXML opts item =
 inlinesToOpenXML :: WriterOptions -> [Inline] -> WS [Element]
 inlinesToOpenXML opts lst = concat `fmap` mapM (inlineToOpenXML opts) lst
 
+asList :: Int -> WS a -> WS a
+asList numid p = do
+  origListLevel <- gets stListLevel
+  origNumId <- gets stListNumId
+  modify $ \st -> st{ stListLevel = stListLevel st + 1 }
+  result <- p
+  modify $ \st -> st{ stListLevel = origListLevel }
+  return result
+
 getTextProps :: WS [Element]
 getTextProps = do
   props <- gets stTextProperties
@@ -417,9 +429,19 @@ withTextProp d p = do
 getParaProps :: WS [Element]
 getParaProps = do
   props <- gets stParaProperties
-  return $ if null props
-              then []
-              else [mknode "w:pPr" [] $ props]
+  listLevel <- gets stListLevel
+  numid <- gets stListNumId
+  let listPr = if listLevel >= 0 || numid > 0
+                  then [ mknode "w:pStyle" [("w:val","ListParagraph")] ()
+                       , mknode "w:numPr" []
+                         [ mknode "w:ilvl" [("w:val",show listLevel)] ()
+                         , mknode "w:numId" [("w:val",show numid)] ()
+                         ]
+                        ]
+                  else []
+  return $ case props ++ listPr of
+                [] -> []
+                ps -> [mknode "w:pPr" [] ps]
 
 pushParaProp :: Element -> WS ()
 pushParaProp d = modify $ \s -> s{ stParaProperties = d : stParaProperties s }
