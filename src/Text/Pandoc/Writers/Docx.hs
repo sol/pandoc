@@ -329,13 +329,17 @@ blockToOpenXML opts (Table caption aligns widths headers rows) = do
       )
     ] ++ caption'
 blockToOpenXML opts (BulletList lst) = asList
-  $ withMarker BulletMarker
-  $ concat `fmap` mapM (blocksToOpenXML opts) lst
+  $ concat `fmap` mapM (listItemToOpenXML opts BulletMarker) lst
 blockToOpenXML opts (OrderedList (start, numstyle, numdelim) lst) = asList
-  $ withMarker (NumberMarker DefaultStyle DefaultDelim 1)
-  $ concat `fmap` mapM (blocksToOpenXML opts) lst
+  $ concat `fmap` mapM (listItemToOpenXML opts (NumberMarker DefaultStyle DefaultDelim 1)) lst
 blockToOpenXML opts x =
   blockToOpenXML opts (Para [Str "BLOCK"])
+
+listItemToOpenXML opts marker [] = return []
+listItemToOpenXML opts marker (first:rest) = do
+  first' <- withMarker marker $ blockToOpenXML opts first
+  rest'  <- blocksToOpenXML opts rest
+  return $ first' ++ rest'
 
 alignmentToString :: Alignment -> [Char]
 alignmentToString alignment = case alignment of
