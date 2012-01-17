@@ -325,8 +325,9 @@ blockToOpenXML opts (Table caption aligns widths headers rows) = do
       map (mkrow False) rows'
       )
     ] ++ caption'
-blockToOpenXML opts (BulletList lst) = asList 1 $
-  concat `fmap` mapM (blocksToOpenXML opts) lst
+blockToOpenXML opts (BulletList lst) = asList
+  $ withParaProp (pStyle "ListBullet")
+  $ concat `fmap` mapM (blocksToOpenXML opts) lst
 blockToOpenXML opts x =
   blockToOpenXML opts (Para [Str "BLOCK"])
 
@@ -381,10 +382,9 @@ tableItemToOpenXML opts item =
 inlinesToOpenXML :: WriterOptions -> [Inline] -> WS [Element]
 inlinesToOpenXML opts lst = concat `fmap` mapM (inlineToOpenXML opts) lst
 
-asList :: Int -> WS a -> WS a
-asList numid p = do
+asList :: WS a -> WS a
+asList p = do
   origListLevel <- gets stListLevel
-  origNumId <- gets stListNumId
   modify $ \st -> st{ stListLevel = stListLevel st + 1 }
   result <- p
   modify $ \st -> st{ stListLevel = origListLevel }
@@ -414,12 +414,12 @@ getParaProps :: WS [Element]
 getParaProps = do
   props <- gets stParaProperties
   listLevel <- gets stListLevel
-  numid <- gets stListNumId
-  let listPr = if listLevel >= 0 || numid > 0
+  -- numid <- gets stListNumId
+  let listPr = if listLevel >= 0 -- || numid > 0
                   then [ mknode "w:pStyle" [("w:val","ListParagraph")] ()
                        , mknode "w:numPr" []
                          [ mknode "w:ilvl" [("w:val",show listLevel)] ()
-                         , mknode "w:numId" [("w:val",show numid)] ()
+                         -- , mknode "w:numId" [("w:val",show numid)] ()
                          ]
                         ]
                   else []
