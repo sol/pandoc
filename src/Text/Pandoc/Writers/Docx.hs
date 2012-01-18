@@ -74,7 +74,7 @@ defaultWriterState = WriterState{
       , stSectionIds     = []
       , stExternalLinks  = M.empty
       , stImages         = M.empty
-      , stListLevel      = -1 -- not in a list
+      , stListLevel      = 0 -- not in a list
       , stListMarker     = NoMarker
       }
 
@@ -337,8 +337,11 @@ blockToOpenXML opts x =
 
 listItemToOpenXML opts marker [] = return []
 listItemToOpenXML opts marker (first:rest) = do
+  lvl <- gets stListLevel
   first' <- withMarker marker $ blockToOpenXML opts first
-  rest'  <- blocksToOpenXML opts rest
+  rest'  <- -- withParaProp (mknode "w:ind" [("w:left",show $ 360 * (lvl + 1))] ())
+            -- $
+            blocksToOpenXML opts rest
   return $ first' ++ rest'
 
 alignmentToString :: Alignment -> [Char]
@@ -437,7 +440,7 @@ getParaProps = do
                      NoMarker     -> []
                      BulletMarker -> ["ListBullet"]
                      NumberMarker _ _ _ -> ["ListNumber"]
-  let listPr = if listLevel >= 0
+  let listPr = if listLevel >= 1
                   then [ mknode "w:numPr" []
                          [ mknode "w:ilvl" [("w:val",show listLevel)] () ]
                        ] ++
