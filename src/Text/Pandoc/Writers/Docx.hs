@@ -28,7 +28,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 Conversion of 'Pandoc' documents to docx.
 -}
 module Text.Pandoc.Writers.Docx ( writeDocx ) where
-import Data.List ( intercalate )
+import Data.List ( intercalate, elemIndex )
 import System.FilePath ( (</>) )
 import qualified Data.ByteString.Lazy as B
 import qualified Data.Map as M
@@ -59,12 +59,13 @@ data WriterState = WriterState{
        , stImages         :: M.Map FilePath (String, B.ByteString)
        , stListLevel      :: Int
        , stListMarker     :: ListMarker
+       , stMarkersUsed    :: [ListMarker]
        }
 
 data ListMarker = NoMarker
                 | BulletMarker
                 | NumberMarker ListNumberStyle ListNumberDelim Int
-                deriving (Show, Read, Eq)
+                deriving (Show, Read, Eq, Ord)
 
 defaultWriterState :: WriterState
 defaultWriterState = WriterState{
@@ -76,6 +77,7 @@ defaultWriterState = WriterState{
       , stImages         = M.empty
       , stListLevel      = 0 -- not in a list
       , stListMarker     = NoMarker
+      , stMarkersUsed    = [NoMarker]
       }
 
 type WS a = StateT WriterState IO a
@@ -142,9 +144,13 @@ writeDocx mbRefDocx opts doc = do
                         Nothing -> error $ stylepath ++ "missing in reference docx"
   let styledoc' = styledoc{ elContent = elContent styledoc ++ map Elem newstyles }
   let styleEntry = toEntry stylepath epochtime $ fromString $ ppTopElement styledoc'
+  -- construct word/numbering.xml
+  let markersUsed = stMarkersUsed st
+  let numpath = "word/numbering.xml"
+  let numEntry = toEntry numpath epochtime $ fromString $ ppTopElement $ mkNumbering markersUsed
   -- TODO add metadata, etc.
   let archive = foldr addEntryToArchive refArchive $
-                  contentEntry : relEntry : styleEntry : imageEntries
+                  contentEntry : relEntry : numEntry : styleEntry : imageEntries
   return $ fromArchive archive
 
 styleToOpenXml :: Style -> [Element]
@@ -181,6 +187,46 @@ styleToOpenXml style = parStyle : map toStyle alltoktypes
                                : ( maybe [] (\col -> [mknode "w:shd" [("w:val","clear"),("w:fill",drop 1 $ fromColor col)] ()])
                                  $ backgroundColor style )
                              ]
+
+mkNumbering :: [ListMarker] -> Element
+mkNumbering markers =
+  mknode "w:numbering" [("xmlns:w","http://schemas.openxmlformats.org/wordprocessingml/2006/main")]
+   $  zipWith mkAbstractNum nums markers
+   ++ map mkNum nums
+     where nums = [1..(length markers)]
+
+mkNum :: Int -> Element
+mkNum numid =
+  mknode "w:num" [("w:numId",show numid)]
+  $ mknode "w:abstractNumId" [("w:val",show numid)] ()
+
+mkAbstractNum :: Int -> ListMarker -> Element
+mkAbstractNum numid marker =
+  mknode "w:abstractNum" [("w:abstractNumId",show numid)]
+    $ mknode "w:multiLevelType" [("w:val","multilevel")] ()
+    : map (mkLvl marker) [0..6]
+
+mkLvl :: ListMarker -> Int -> Element
+mkLvl marker lvl =
+  mknode "w:lvl" [("w:ilvl",show lvl)]
+    [ mknode "w:start" [("w:val",start)] ()
+    , mknode "w:numFmt" [("w:val",fmt)] ()
+    , mknode "w:lvlText" [("w:val",lvltxt)] ()
+    , mknode "w:lvlJc" [("w:val","left")] ()
+    , mknode "w:pPr" []
+      [ mknode "w:tabs" []
+        $ mknode "w:tab" [("w:val","num"),("w:pos",show $ lvl * step)] ()
+      , mknode "w:ind" [("w:left",show $ lvl * step + hang),("w:hanging",show hang)] ()
+      ]
+    ]
+    where (fmt, lvltxt, start) =
+            case marker of
+                 NoMarker           -> ("bullet"," ","1")
+                 BulletMarker       -> ("bullet","o","1") -- TODO
+                 NumberMarker _ _ s -> ("decimal","%" ++ show lvl ++ ".",show s) -- TODO
+          step = 720
+          hang = step `div` 2
+
 -- | Convert Pandoc document to string in OpenXML format.
 writeOpenXML :: WriterOptions -> Pandoc -> WS Element
 writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) = do
@@ -328,20 +374,30 @@ blockToOpenXML opts (Table caption aligns widths headers rows) = do
       map (mkrow False) rows'
       )
     ] ++ caption'
-blockToOpenXML opts (BulletList lst) = asList
-  $ concat `fmap` mapM (listItemToOpenXML opts BulletMarker) lst
-blockToOpenXML opts (OrderedList (start, numstyle, numdelim) lst) = asList
-  $ concat `fmap` mapM (listItemToOpenXML opts (NumberMarker DefaultStyle DefaultDelim 1)) lst
+blockToOpenXML opts (BulletList lst) = do
+  let marker = BulletMarker
+  asList $ concat `fmap` mapM (listItemToOpenXML opts marker) lst
+blockToOpenXML opts (OrderedList (start, numstyle, numdelim) lst) = do
+  let marker = NumberMarker DefaultStyle DefaultDelim 1 -- TODO
+  asList $ concat `fmap` mapM (listItemToOpenXML opts marker) lst
 blockToOpenXML opts x =
   blockToOpenXML opts (Para [Str "BLOCK"])
+
+getNumId :: WS Int
+getNumId = do
+  marker <- gets stListMarker
+  markersUsed <- gets stMarkersUsed
+  case elemIndex marker markersUsed of
+           Just x  -> return $ x + 1
+           Nothing -> do
+                modify $ \st -> st{ stMarkersUsed = markersUsed ++ [marker] }
+                return $ length markersUsed + 1
 
 listItemToOpenXML opts marker [] = return []
 listItemToOpenXML opts marker (first:rest) = do
   lvl <- gets stListLevel
   first' <- withMarker marker $ blockToOpenXML opts first
-  rest'  <- -- withParaProp (mknode "w:ind" [("w:left",show $ 360 * (lvl + 1))] ())
-            -- $
-            blocksToOpenXML opts rest
+  rest'  <- withMarker NoMarker $ blocksToOpenXML opts rest
   return $ first' ++ rest'
 
 alignmentToString :: Alignment -> [Char]
@@ -435,16 +491,12 @@ getParaProps :: WS [Element]
 getParaProps = do
   props <- gets stParaProperties
   listLevel <- gets stListLevel
-  listMarker <- gets stListMarker
-  let styles = case listMarker of
-                     NoMarker     -> []
-                     BulletMarker -> ["ListBullet"]
-                     NumberMarker _ _ _ -> ["ListNumber"]
+  numid <- getNumId
   let listPr = if listLevel >= 1
                   then [ mknode "w:numPr" []
-                         [ mknode "w:ilvl" [("w:val",show listLevel)] () ]
-                       ] ++
-                       map (\sty -> mknode "w:pStyle" [("w:val",sty)] ()) styles
+                         [ mknode "w:numId" [("w:val",show numid)] ()
+                         , mknode "w:ilvl" [("w:val",show listLevel)] () ]
+                       ]
                   else []
   return $ case props ++ listPr of
                 [] -> []
