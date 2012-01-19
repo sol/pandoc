@@ -109,7 +109,6 @@ writeDocx mbRefDocx opts doc = do
   (newContents, st) <- runStateT (writeOpenXML opts{writerWrapText = False} doc)
                        defaultWriterState
   (TOD epochtime _) <- getClockTime
-  -- TODO modify reldoc by adding image and link info
   let imgs = M.elems $ stImages st
   let imgPath ident img = "media/" ++ ident ++
                             case imageType img of
@@ -405,46 +404,6 @@ alignmentToString alignment = case alignment of
                                  AlignRight -> "right"
                                  AlignCenter -> "center"
                                  AlignDefault -> "left"
-
-
-
-{-
-blockToOpenXML opts (BulletList lst) =
-  mknode "itemizedlist" [] $ listItemsToOpenXML opts lst
-blockToOpenXML _ (OrderedList _ []) = empty
-blockToOpenXML opts (OrderedList (start, numstyle, _) (first:rest)) =
-  let attribs  = case numstyle of
-                       DefaultStyle -> []
-                       Decimal      -> [("numeration", "arabic")]
-                       Example      -> [("numeration", "arabic")]
-                       UpperAlpha   -> [("numeration", "upperalpha")]
-                       LowerAlpha   -> [("numeration", "loweralpha")]
-                       UpperRoman   -> [("numeration", "upperroman")]
-                       LowerRoman   -> [("numeration", "lowerroman")]
-      items    = if start == 1
-                    then listItemsToOpenXML opts (first:rest)
-                    else (mknode "listitem" [("override",show start)]
-                         [ (blocksToOpenXML opts $ map plainToPara first))
-                         , listItemsToOpenXML opts rest]
-  in  mknode "orderedlist" attribs items
-blockToOpenXML opts (DefinitionList lst) =
-  mknode "variablelist" [] $ deflistItemsToOpenXML opts lst
-
-
--}
-{-
-tableRowToOpenXML :: WriterOptions
-                  -> [[Block]]
-                  -> Doc
-tableRowToOpenXML opts cols =
-  mknode "row" [] $ vcat $ map (tableItemToOpenXML opts) cols
-
-tableItemToOpenXML :: WriterOptions
-                   -> [Block]
-                   -> Doc
-tableItemToOpenXML opts item =
-  mknode "entry" [] $ vcat $ map (blockToOpenXML opts) item
--}
 
 -- | Convert a list of inline elements to OpenXML.
 inlinesToOpenXML :: WriterOptions -> [Inline] -> WS [Element]
