@@ -91,7 +91,7 @@ writeDocx :: Maybe FilePath -- ^ Path specified by --reference-docx
           -> WriterOptions  -- ^ Writer options
           -> Pandoc         -- ^ Document to convert
           -> IO B.ByteString
-writeDocx mbRefDocx opts doc = do
+writeDocx mbRefDocx opts doc@(Pandoc (Meta tit auths _) _) = do
   let datadir = writerUserDataDir opts
   refArchive <- liftM toArchive $
        case mbRefDocx of
@@ -148,8 +148,20 @@ writeDocx mbRefDocx opts doc = do
   let numpath = "word/numbering.xml"
   let numEntry = toEntry numpath epochtime $ fromString $ ppTopElement $ mkNumbering markersUsed
   -- TODO add metadata, etc.
+  let docPropsPath = "docProps/core.xml"
+  let docProps = mknode "cp:coreProperties"
+          [("xmlns:cp","http://schemas.openxmlformats.org/package/2006/metadata/core-properties")
+          ,("xmlns:dc","http://purl.org/dc/elements/1.1/")
+          ,("xmlns:dcterms","http://purl.org/dc/terms/")
+          ,("xmlns:dcmitype","http://purl.org/dc/dcmitype/")
+          ,("xmlns:xsi","http://www.w3.org/2001/XMLSchema-instance")]
+          $ mknode "dc:title" [] (stringify tit)
+          : mknode "dcterms:created" [("xsi:type","dcterms:W3CDTF")] ()  -- put doc date here
+          : mknode "dcterms:modified" [("xsi:type","dcterms:W3CDTF")] () -- put current time here
+          : map (mknode "dc:creator" [] . stringify) auths
+  let docPropsEntry = toEntry docPropsPath epochtime $ fromString $ ppTopElement docProps
   let archive = foldr addEntryToArchive refArchive $
-                  contentEntry : relEntry : numEntry : styleEntry : imageEntries
+                  contentEntry : relEntry : numEntry : styleEntry : docPropsEntry : imageEntries
   return $ fromArchive archive
 
 styleToOpenXml :: Style -> [Element]
@@ -253,10 +265,10 @@ mkLvl marker lvl =
 -- | Convert Pandoc document to string in OpenXML format.
 writeOpenXML :: WriterOptions -> Pandoc -> WS Element
 writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) = do
-  title <- withParaProp (pStyle "Title") $ blockToOpenXML opts (Para tit)
-  authors <- withParaProp (pStyle "Authors") $ blockToOpenXML opts
-                 $ Para (intercalate [LineBreak] auths)
-  date <- withParaProp (pStyle "Date") $ blockToOpenXML opts (Para dat)
+  title <- withParaProp (pStyle "Title") $ blocksToOpenXML opts [Para tit | not (null tit)]
+  authors <- withParaProp (pStyle "Authors") $ blocksToOpenXML opts
+                 [Para (intercalate [LineBreak] auths) | not (null auths)]
+  date <- withParaProp (pStyle "Date") $ blocksToOpenXML opts [Para dat | not (null dat)]
   let convertSpace (Str x : Space : Str y : xs) = Str (x ++ " " ++ y) : xs
       convertSpace (Str x : Str y : xs) = Str (x ++ y) : xs
       convertSpace xs = xs
