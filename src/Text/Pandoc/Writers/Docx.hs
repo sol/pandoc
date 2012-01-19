@@ -222,11 +222,34 @@ mkLvl marker lvl =
     ]
     where (fmt, lvltxt, start) =
             case marker of
-                 NoMarker           -> ("bullet"," ","1")
-                 BulletMarker       -> ("bullet","o","1") -- TODO
-                 NumberMarker _ _ s -> ("decimal","%" ++ show (lvl + 1) ++ ".",show s) -- TODO
+                 NoMarker             -> ("bullet"," ","1")
+                 BulletMarker         -> ("bullet",bulletFor lvl,"1")
+                 NumberMarker st de n -> (styleFor st lvl
+                                         ,patternFor de ("%" ++ show (lvl + 1))
+                                         ,show n)
           step = 720
           hang = step `div` 2
+          bulletFor 1 = "\8226"
+          bulletFor 2 = "\9702"
+          bulletFor 3 = "\8227"
+          bulletFor 4 = "\8259"
+          bulletFor 5 = "\8226"
+          bulletFor _ = "\9702"
+          styleFor UpperAlpha _ = "upperLetter"
+          styleFor LowerAlpha _ = "lowerLetter"
+          styleFor UpperRoman _ = "upperRoman"
+          styleFor LowerRoman _ = "lowerRoman"
+          styleFor Decimal _ = "decimal"
+          styleFor DefaultStyle 1 = "decimal"
+          styleFor DefaultStyle 2 = "lowerLetter"
+          styleFor DefaultStyle 3 = "lowerRoman"
+          styleFor DefaultStyle 4 = "decimal"
+          styleFor DefaultStyle 5 = "lowerLetter"
+          styleFor DefaultStyle 6 = "lowerRoman"
+          styleFor _ _ = "decimal"
+          patternFor OneParen s = s ++ ")"
+          patternFor TwoParens s = "(" ++ s ++ ")"
+          patternFor _ s = s ++ "."
 
 -- | Convert Pandoc document to string in OpenXML format.
 writeOpenXML :: WriterOptions -> Pandoc -> WS Element
@@ -379,7 +402,7 @@ blockToOpenXML opts (BulletList lst) = do
   let marker = BulletMarker
   asList $ concat `fmap` mapM (listItemToOpenXML opts marker) lst
 blockToOpenXML opts (OrderedList (start, numstyle, numdelim) lst) = do
-  let marker = NumberMarker DefaultStyle DefaultDelim 1 -- TODO
+  let marker = NumberMarker numstyle numdelim start
   asList $ concat `fmap` mapM (listItemToOpenXML opts marker) lst
 blockToOpenXML opts x =
   blockToOpenXML opts (Para [Str "BLOCK"])
