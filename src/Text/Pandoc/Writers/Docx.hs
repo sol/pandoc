@@ -253,9 +253,10 @@ mkLvl marker lvl =
 -- | Convert Pandoc document to string in OpenXML format.
 writeOpenXML :: WriterOptions -> Pandoc -> WS Element
 writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) = do
-  -- let title = empty -- inlinesToOpenXML opts tit
-  -- let authors = [] -- map (authorToOpenXML opts) auths
-  -- let date = empty -- inlinesToOpenXML opts dat
+  title <- withParaProp (pStyle "Title") $ blockToOpenXML opts (Para tit)
+  authors <- withParaProp (pStyle "Authors") $ blockToOpenXML opts
+                 $ Para (intercalate [LineBreak] auths)
+  date <- withParaProp (pStyle "Date") $ blockToOpenXML opts (Para dat)
   let convertSpace (Str x : Space : Str y : xs) = Str (x ++ " " ++ y) : xs
       convertSpace (Str x : Str y : xs) = Str (x ++ y) : xs
       convertSpace xs = xs
@@ -265,8 +266,7 @@ writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) = do
   let notes = case notes' of
                    [] -> []
                    ns -> [mknode "w:footnotes" [] ns]
-  -- TODO do something with metadata (title, date, author)
-  -- TODO eventually use xml module
+  let meta = title ++ authors ++ date
   return $ mknode "w:document"
             [("xmlns:w","http://schemas.openxmlformats.org/wordprocessingml/2006/main")
             ,("xmlns:m","http://schemas.openxmlformats.org/officeDocument/2006/math")
@@ -276,7 +276,8 @@ writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) = do
             ,("xmlns:w10","urn:schemas-microsoft-com:office:word")
             ,("xmlns:a","http://schemas.openxmlformats.org/drawingml/2006/main")
             ,("xmlns:pic","http://schemas.openxmlformats.org/drawingml/2006/picture")
-            ,("xmlns:wp","http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing")] (mknode "w:body" [] (doc ++ notes))
+            ,("xmlns:wp","http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing")]
+         $ mknode "w:body" [] (meta ++ doc ++ notes)
 
 -- | Convert a list of Pandoc blocks to OpenXML.
 blocksToOpenXML :: WriterOptions -> [Block] -> WS [Element]
