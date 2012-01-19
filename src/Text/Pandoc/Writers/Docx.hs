@@ -36,7 +36,6 @@ import Data.ByteString.Lazy.UTF8 ( fromString, toString )
 import Codec.Archive.Zip
 import System.Time
 import Paths_pandoc ( getDataFileName )
-import Text.Pandoc.MIME ( getMimeType )
 import Text.Pandoc.Definition
 import Text.Pandoc.Generic
 import System.Directory
@@ -347,10 +346,10 @@ blockToOpenXML opts (Table caption aligns widths headers rows) = do
                  else withParaProp (pStyle "TableCaption")
                       $ blockToOpenXML opts (Para caption)
   let alignmentFor al = mknode "w:jc" [("w:val",alignmentToString al)] ()
-  let cellToOpenXML opts (al, cell) = withParaProp (alignmentFor al)
+  let cellToOpenXML (al, cell) = withParaProp (alignmentFor al)
                                     $ blocksToOpenXML opts cell
-  headers' <- mapM (cellToOpenXML opts) $ zip aligns headers
-  rows' <- mapM (\cells -> mapM (cellToOpenXML opts) $ zip aligns cells)
+  headers' <- mapM cellToOpenXML $ zip aligns headers
+  rows' <- mapM (\cells -> mapM cellToOpenXML $ zip aligns cells)
            $ rows
   let borderProps = mknode "w:tcPr" []
                     [ mknode "w:tcBorders" []
@@ -364,7 +363,7 @@ blockToOpenXML opts (Table caption aligns widths headers rows) = do
   let mkrow border cells = mknode "w:tr" [] $ map (mkcell border) cells
   let textwidth = 7920  -- 5.5 in in twips, 1/20 pt
   let mkgridcol w = mknode "w:gridCol"
-                       [("w:w", show $ floor $ textwidth * w)] ()
+                       [("w:w", show $ (floor (textwidth * w) :: Integer))] ()
   return $
     [ mknode "w:tbl" []
       ( mknode "w:tblPr" []
@@ -405,9 +404,9 @@ getNumId = do
                 modify $ \st -> st{ stMarkersUsed = markersUsed ++ [marker] }
                 return $ length markersUsed + 1
 
+listItemToOpenXML :: WriterOptions -> ListMarker -> [Block] -> WS [Element]
 listItemToOpenXML _ _ []                   = return []
 listItemToOpenXML opts marker (first:rest) = do
-  lvl <- gets stListLevel
   first' <- withMarker marker $ blockToOpenXML opts first
   rest'  <- withMarker NoMarker $ blocksToOpenXML opts rest
   return $ first' ++ rest'
@@ -531,7 +530,7 @@ inlineToOpenXML opts (Math t str) =
                   then DisplayInline
                   else DisplayBlock
 inlineToOpenXML opts (Cite _ lst) = inlinesToOpenXML opts lst
-inlineToOpenXML opts (Code attrs str) =
+inlineToOpenXML _ (Code attrs str) =
   withTextProp (rStyle "VerbatimChar")
   $ case highlight formatOpenXML attrs str of
          Nothing  -> intercalate [mknode "w:br" [] ()]
