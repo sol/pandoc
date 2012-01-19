@@ -82,6 +82,9 @@ defaultWriterState = WriterState{
 
 type WS a = StateT WriterState IO a
 
+showTopElement' :: Element -> String
+showTopElement' x = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" ++ showElement x
+
 mknode :: Node t => String -> [(String,String)] -> t -> Element
 mknode s attrs =
   add_attrs (map (\(k,v) -> Attr (unqual k) v) attrs) . node (unqual s)
@@ -132,8 +135,8 @@ writeDocx mbRefDocx opts doc@(Pandoc (Meta tit auths _) _) = do
   let toLinkRel (src,ident) =  mknode "Relationship" [("Type","http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"),("Id",ident),("Target",src),("TargetMode","External") ] ()
   let newrels' = map toLinkRel $ M.toList $ stExternalLinks st
   let reldoc'' = reldoc' { elContent = elContent reldoc' ++ map Elem newrels' }
-  let relEntry = toEntry relpath epochtime $ fromString $ ppTopElement reldoc''
-  let contentEntry = toEntry "word/document.xml" epochtime $ fromString $ ppTopElement newContents
+  let relEntry = toEntry relpath epochtime $ fromString $ showTopElement' reldoc''
+  let contentEntry = toEntry "word/document.xml" epochtime $ fromString $ showTopElement' newContents
   -- styles
   let newstyles = styleToOpenXml $ writerHighlightStyle opts
   let stylepath = "word/styles.xml"
@@ -142,11 +145,11 @@ writeDocx mbRefDocx opts doc@(Pandoc (Meta tit auths _) _) = do
                         Just d  -> d
                         Nothing -> error $ stylepath ++ "missing in reference docx"
   let styledoc' = styledoc{ elContent = elContent styledoc ++ map Elem newstyles }
-  let styleEntry = toEntry stylepath epochtime $ fromString $ ppTopElement styledoc'
+  let styleEntry = toEntry stylepath epochtime $ fromString $ showTopElement' styledoc'
   -- construct word/numbering.xml
   let markersUsed = stMarkersUsed st
   let numpath = "word/numbering.xml"
-  let numEntry = toEntry numpath epochtime $ fromString $ ppTopElement $ mkNumbering markersUsed
+  let numEntry = toEntry numpath epochtime $ fromString $ showTopElement' $ mkNumbering markersUsed
   -- TODO add metadata, etc.
   let docPropsPath = "docProps/core.xml"
   let docProps = mknode "cp:coreProperties"
@@ -159,7 +162,7 @@ writeDocx mbRefDocx opts doc@(Pandoc (Meta tit auths _) _) = do
           : mknode "dcterms:created" [("xsi:type","dcterms:W3CDTF")] ()  -- put doc date here
           : mknode "dcterms:modified" [("xsi:type","dcterms:W3CDTF")] () -- put current time here
           : map (mknode "dc:creator" [] . stringify) auths
-  let docPropsEntry = toEntry docPropsPath epochtime $ fromString $ ppTopElement docProps
+  let docPropsEntry = toEntry docPropsPath epochtime $ fromString $ showTopElement' docProps
   let archive = foldr addEntryToArchive refArchive $
                   contentEntry : relEntry : numEntry : styleEntry : docPropsEntry : imageEntries
   return $ fromArchive archive
