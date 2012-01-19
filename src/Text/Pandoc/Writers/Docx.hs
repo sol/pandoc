@@ -261,11 +261,6 @@ writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) = do
       convertSpace (Str x : Str y : xs) = Str (x ++ y) : xs
       convertSpace xs = xs
   let blocks' = bottomUp convertSpace $ blocks
-  -- let isInternal ('#':_) = True
-  --     isInternal _       = False
-  -- let findLink x@(Link _ (s,_)) = [s | not (isInternal s)]
-  --     findLink x = []
-  --     extlinks = nub $ sort $ queryWith findLink blocks'
   doc <- blocksToOpenXML opts blocks'
   notes' <- reverse `fmap` gets stFootnotes
   let notes = case notes' of
@@ -288,31 +283,6 @@ writeOpenXML opts (Pandoc (Meta tit auths dat) blocks) = do
 blocksToOpenXML :: WriterOptions -> [Block] -> WS [Element]
 blocksToOpenXML opts bls = concat `fmap` mapM (blockToOpenXML opts) bls
 
-{-
--- | Convert a list of pairs of terms and definitions into a list of
--- OpenXML varlistentrys.
-deflistItemsToOpenXML :: WriterOptions -> [([Inline],[[Block]])] -> Doc
-deflistItemsToOpenXML opts items =
-  vcat $ map (\(term, defs) -> deflistItemToOpenXML opts term defs) items
-
--- | Convert a term and a list of blocks into a OpenXML varlistentry.
-deflistItemToOpenXML :: WriterOptions -> [Inline] -> [[Block]] -> Doc
-deflistItemToOpenXML opts term defs =
-  let def' = concatMap (map plainToPara) defs
-  in  mknode "varlistentry" [] $
-      mknode "term" [] (inlinesToOpenXML opts term) $$
-      mknode "listitem" [] (blocksToOpenXML opts def')
-
--- | Convert a list of lists of blocks to a list of OpenXML list items.
-listItemsToOpenXML :: WriterOptions -> [[Block]] -> Doc
-listItemsToOpenXML opts items = vcat $ map (listItemToOpenXML opts) items
-
--- | Convert a list of blocks into a OpenXML list item.
-listItemToOpenXML :: WriterOptions -> [Block] -> Doc
-listItemToOpenXML opts item =
-  mknode "listitem" [] $ blocksToOpenXML opts $ map plainToPara item
--}
-
 pStyle :: String -> Element
 pStyle sty = mknode "w:pStyle" [("w:val",sty)] ()
 
@@ -322,17 +292,6 @@ rStyle sty = mknode "w:rStyle" [("w:val",sty)] ()
 -- | Convert a Pandoc block element to OpenXML.
 blockToOpenXML :: WriterOptions -> Block -> WS [Element]
 blockToOpenXML _ Null = return []
-{-
- - see image-example.openxml.xml
-blockToOpenXML opts (Para [Image txt (src,_)]) =
-  let capt = inlinesToOpenXML opts txt
-  in  mknode "figure" [] $
-        inTagsSimple "title" capt $$
-        (mknode "mediaobject" [] $
-           (mknode "imageobject" []
-             (mknode "imagedata" [("fileref",src)] ())) $$
-           inTagsSimple "textobject" (inTagsSimple "phrase" capt))
--}
 blockToOpenXML opts (Header lev lst) = do
   contents <- withParaProp (pStyle $ "Heading" ++ show lev) $
                blockToOpenXML opts (Para lst)
@@ -344,6 +303,12 @@ blockToOpenXML opts (Header lev lst) = do
   let bookmarkEnd = mknode "w:bookmarkEnd" [("w:id",ident)] ()
   return $ [bookmarkStart] ++ contents ++ [bookmarkEnd]
 blockToOpenXML opts (Plain lst) = blockToOpenXML opts (Para lst)
+blockToOpenXML opts (Para x@[Image alt _]) = do
+  paraProps <- getParaProps
+  contents <- inlinesToOpenXML opts x
+  captionNode <- withParaProp (pStyle "ImageCaption")
+                 $ blockToOpenXML opts (Para alt)
+  return $ mknode "w:p" [] (paraProps ++ contents) : captionNode
 blockToOpenXML opts (Para lst) = do
   paraProps <- getParaProps
   contents <- inlinesToOpenXML opts lst
@@ -404,8 +369,18 @@ blockToOpenXML opts (BulletList lst) = do
 blockToOpenXML opts (OrderedList (start, numstyle, numdelim) lst) = do
   let marker = NumberMarker numstyle numdelim start
   asList $ concat `fmap` mapM (listItemToOpenXML opts marker) lst
+blockToOpenXML opts (DefinitionList items) =
+  concat `fmap` mapM (definitionListItemToOpenXML opts) items
 blockToOpenXML opts x =
   blockToOpenXML opts (Para [Str "BLOCK"])
+
+definitionListItemToOpenXML  :: WriterOptions -> ([Inline],[[Block]]) -> WS [Element]
+definitionListItemToOpenXML opts (term,defs) = do
+  term' <- withParaProp (pStyle "DefinitionTerm")
+           $ blockToOpenXML opts (Para term)
+  defs' <- withParaProp (pStyle "Definition")
+           $ concat `fmap` mapM (blocksToOpenXML opts) defs
+  return $ term' ++ defs'
 
 getNumId :: WS Int
 getNumId = do
