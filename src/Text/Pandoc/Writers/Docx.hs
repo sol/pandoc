@@ -383,8 +383,6 @@ blockToOpenXML opts (OrderedList (start, numstyle, numdelim) lst) = do
   asList $ concat `fmap` mapM (listItemToOpenXML opts marker) lst
 blockToOpenXML opts (DefinitionList items) =
   concat `fmap` mapM (definitionListItemToOpenXML opts) items
-blockToOpenXML opts x =
-  blockToOpenXML opts (Para [Str "BLOCK"])
 
 definitionListItemToOpenXML  :: WriterOptions -> ([Inline],[[Block]]) -> WS [Element]
 definitionListItemToOpenXML opts (term,defs) = do
@@ -404,7 +402,7 @@ getNumId = do
                 modify $ \st -> st{ stMarkersUsed = markersUsed ++ [marker] }
                 return $ length markersUsed + 1
 
-listItemToOpenXML opts marker [] = return []
+listItemToOpenXML _ _ []                   = return []
 listItemToOpenXML opts marker (first:rest) = do
   lvl <- gets stListLevel
   first' <- withMarker marker $ blockToOpenXML opts first
