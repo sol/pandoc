@@ -208,9 +208,10 @@ mkAbstractNum numid marker =
 
 mkLvl :: ListMarker -> Int -> Element
 mkLvl marker lvl =
-  mknode "w:lvl" [("w:ilvl",show lvl)]
+  mknode "w:lvl" [("w:ilvl",show lvl)] $
     [ mknode "w:start" [("w:val",start)] ()
-    , mknode "w:numFmt" [("w:val",fmt)] ()
+      | marker /= NoMarker && marker /= BulletMarker ] ++
+    [ mknode "w:numFmt" [("w:val",fmt)] ()
     , mknode "w:lvlText" [("w:val",lvltxt)] ()
     , mknode "w:lvlJc" [("w:val","left")] ()
     , mknode "w:pPr" []
@@ -223,7 +224,7 @@ mkLvl marker lvl =
             case marker of
                  NoMarker           -> ("bullet"," ","1")
                  BulletMarker       -> ("bullet","o","1") -- TODO
-                 NumberMarker _ _ s -> ("decimal","%" ++ show lvl ++ ".",show s) -- TODO
+                 NumberMarker _ _ s -> ("decimal","%" ++ show (lvl + 1) ++ ".",show s) -- TODO
           step = 720
           hang = step `div` 2
 
