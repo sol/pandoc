@@ -1,5 +1,5 @@
 {-
-Copyright (C) 2006-2010 John MacFarlane <jgm@berkeley.edu>
+Copyright (C) 2006-2012 John MacFarlane <jgm@berkeley.edu>
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -18,8 +18,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 {- |
    Module      : Text.Pandoc.Readers.LaTeX
-   Copyright   : Copyright (C) 2006-2010 John MacFarlane
-   License     : GNU GPL, version 2 or above 
+   Copyright   : Copyright (C) 2006-2012 John MacFarlane
+   License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
    Stability   : alpha
@@ -27,10 +27,9 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 Conversion of LaTeX to 'Pandoc' document.
 -}
-module Text.Pandoc.Readers.LaTeX ( 
-                                  readLaTeX,
-                                  rawLaTeXInline,
-                                  rawLaTeXEnvironment'
+module Text.Pandoc.Readers.LaTeX ( readLaTeX,
+                                   rawLaTeXInline,
+                                   rawLaTeXEnvironment'
                                  ) where
 
 import Text.ParserCombinators.Parsec
@@ -38,9 +37,12 @@ import Text.Pandoc.Definition
 import Text.Pandoc.Shared
 import Text.Pandoc.Parsing
 import Data.Maybe ( fromMaybe )
-import Data.Char ( chr, toUpper )
+import Data.Char ( chr, toUpper, ord )
 import Data.List ( intercalate, isPrefixOf, isSuffixOf )
 import Control.Monad
+import Text.Pandoc.Builder
+import Data.Char (isLetter)
+import Data.Monoid
 
 -- | Parse LaTeX from string and return 'Pandoc' document.
 readLaTeX :: ParserState   -- ^ Parser state, including options for parser
@@ -48,6 +50,78 @@ readLaTeX :: ParserState   -- ^ Parser state, including options for parser
           -> Pandoc
 readLaTeX = readWith parseLaTeX
 
+type LP = GenParser Char ParserState
+
+anyControlSeq :: LP String
+anyControlSeq = do
+  char '\\'
+  next <- option '\n' anyChar
+  name <- case next of
+               '\n'           -> return ""
+               c | isLetter c -> (c:) `fmap` many letter
+                 | otherwise  -> return [c]
+  skipBlank
+  return name
+
+controlSeq :: String -> LP String
+controlSeq name = try $ do
+  char '\\'
+  guard $ not (null name) && (length name == 1 || all isLetter name)
+  string name
+  skipBlank
+  return name
+
+sp :: LP ()
+sp = do
+  satisfy (\c -> c == ' ' || c == '\t' || c == '\n')
+  skipBlank
+
+skipBlank :: LP ()
+skipBlank = spaces >> skipMany (comment >> spaces)
+
+isLowerHex :: Char -> Bool
+isLowerHex x = x >= '0' && x <= '9' || x >= 'a' && x <= 'f'
+
+tildeEscape :: LP Char
+tildeEscape = try $ do
+  string "^^"
+  c <- satisfy (\x -> x >= '\0' && x <= '\128')
+  d <- if isLowerHex c
+          then option "" $ count 1 (satisfy isLowerHex)
+          else return ""
+  if null d
+     then case ord c of
+           x | x >= 64 && x <= 127 -> return $ chr (x - 64)
+             | otherwise           -> return $ chr (x + 64)
+     else return $ chr $ read ('0':'x':c:d)
+
+comment :: LP ()
+comment = do
+  char '%'
+  skipMany (satisfy (/='\n'))
+  newline
+  return ()
+
+grouped :: Monoid a => LP a -> LP a
+grouped parser = do
+  char '{'
+  skipBlank
+  res <- manyTill (parser >>~ skipBlank) (char '}')
+  return $ mconcat res
+
+
+
+-------
+
+parseLaTeX = undefined
+
+rawLaTeXInline = undefined
+
+rawLaTeXEnvironment' = undefined
+
+
+
+{-
 -- characters with special meaning
 specialChars :: [Char]
 specialChars = "\\`$%^&_~#{}[]\n \t|<>'\"-"
@@ -1047,3 +1121,4 @@ rawLaTeXInline = try $ do
           inp <- getInput
           setInput $ intercalate " " args ++ inp
         return $ Str ""
+-}
