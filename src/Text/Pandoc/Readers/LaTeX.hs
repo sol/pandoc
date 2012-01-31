@@ -109,7 +109,14 @@ grouped parser = do
   res <- manyTill (parser >>~ skipBlank) (char '}')
   return $ mconcat res
 
+inline :: LP Inlines
+inline = undefined
+-- something like:  comment <|> space <|> inlinecommand
 
+block :: LP Blocks
+block = undefined
+-- something like:  comment <|> space <|> blockcommand <|> environment
+-- where environment e.g. looks up a parser in a table
 
 -------
 
