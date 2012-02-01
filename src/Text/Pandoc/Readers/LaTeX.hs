@@ -601,21 +601,6 @@ lhsCodeBlock = do
   (CodeBlock (_,_,_) cont) <- codeBlockWith "code"
   return $ CodeBlock ("", ["sourceCode","literate","haskell"], []) cont
 
---
--- block quotes
---
-
-blockQuote :: GenParser Char ParserState Block
-blockQuote = (environment "quote" <|> environment "quotation") >>~ spaces >>= 
-             return . BlockQuote
-
---
--- list blocks
---
-
-list :: GenParser Char ParserState Block
-list = bulletList <|> orderedList <|> definitionList <?> "list"
-
 listItem :: GenParser Char ParserState ([Inline], [Block])
 listItem = try $ do
   ("item", _, args) <- command
@@ -660,14 +645,6 @@ orderedList = try $ do
   end "enumerate"
   spaces
   return $ OrderedList (start, style, delim) $ map snd items
-
-bulletList :: GenParser Char ParserState Block
-bulletList = try $ do
-  begin "itemize"
-  items <- many listItem
-  end "itemize"
-  spaces
-  return (BulletList $ map snd items)
 
 definitionList :: GenParser Char ParserState Block
 definitionList = try $ do
@@ -859,20 +836,6 @@ image = try $ do
                        []    -> ("", "")
                        (x:_) -> (stripFirstAndLast x, "")
   return $ Image [Str "image"] (escapeURI src, tit)
-
-footnote :: GenParser Char ParserState Inline
-footnote = try $ do
-  (name, _, (contents:[])) <- command
-  if ((name == "footnote") || (name == "thanks"))
-     then string ""
-     else fail "not a footnote or thanks command"
-  let contents' = stripFirstAndLast contents
-  -- parse the extracted block, which may contain various block elements:
-  rest <- getInput
-  setInput $ contents'
-  blocks <- parseBlocks
-  setInput rest
-  return $ Note blocks
 
 -- | citations
 cite :: GenParser Char ParserState Inline
