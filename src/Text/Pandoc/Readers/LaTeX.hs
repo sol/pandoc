@@ -111,21 +111,28 @@ grouped parser = try $ do
   res <- manyTill parser (char '}')
   return $ mconcat res
 
+bracketed :: LP String
+bracketed = try $ do
+  char '['
+  res <- manyTill anyChar (char ']')
+  return $ "[" ++ res ++ "]"
+
 inline :: LP Inlines
 inline = (mempty <$ comment)
      <|> (space  <$ sp)
      <|> inlineText
      <|> inlineCommand
---     <|> dash
---     <|> lquotes
---     <|> rquotes
      <|> grouped inline
---     <|> nbsp
+     <|> (char '-' *> option (str "-")
+           ((char '-') *> option (str "–") (str "—" <$ char '-')))
+     <|> (char '`' *> option (str "‘") (str "“" <$ char '`'))
+     <|> (char '\'' *> option (str "’") (str "”" <$ char '\''))
+     <|> (str "\160" <$ char '~')
 --     <|> math
---     <|> super
---     <|> sub
-     <|> (str . (:[]) <$> tildeEscape)
---     <|> misplaced
+     <|> (superscript <$> (char '^' *> tok))
+     <|> (subscript <$> (char '_' *> tok))
+     <|> (str <$> count 1 tildeEscape)
+     <|> (str <$> count 1 (satisfy (/='\n')))
 
 inlines :: LP Inlines
 inlines = mconcat <$> many (notFollowedBy (char '}') *> inline)
@@ -133,8 +140,8 @@ inlines = mconcat <$> many (notFollowedBy (char '}') *> inline)
 block :: LP Blocks
 block = (mempty <$ comment)
     <|> (mempty <$ blanklines)
-    <|> environment
-    <|> blockCommand
+--    <|> environment
+--    <|> blockCommand
     <|> paragraph
 
 blocks :: LP Blocks
@@ -160,7 +167,11 @@ inlineCommands = M.fromList
   , ("sout", strikeout <$> tok)
   , ("textsuperscript", superscript <$> tok)
   , ("textsubscript", subscript <$> tok)
+  , ("textbackslash", lit "\\")
+  , ("backslash", lit "\\")
   , ("textbf", strong <$> tok)
+  , ("ldots", lit "…")
+  , ("dots", lit "…")
   , ("$", lit "$")
   , ("%", lit "%")
   , ("&", lit "&")
@@ -172,44 +183,55 @@ inlineCommands = M.fromList
   -- old TeX commands
   , ("em", emph <$> inlines)
   , ("it", emph <$> inlines)
-  , ("itshape", emph <$> inlines)
   , ("sl", emph <$> inlines)
+  , ("bf", strong <$> inlines)
+  , ("rm", inlines)
+  , ("itshape", emph <$> inlines)
   , ("slshape", emph <$> inlines)
   , ("scshape", smallcaps <$> inlines)
-  , ("bf", strong <$> inlines)
   , ("bfseries", strong <$> inlines)
   , ("/", pure mempty) -- italic correction
-  , ("cc", lit "\231")
-  , ("cC", lit "\199")
-  , ("aa", lit "\229")
-  , ("AA", lit "\197")
-  , ("ss", lit "\223")
-  , ("o", lit "\248")
-  , ("O", lit "\216")
-  , ("L", lit "\x141")
-  , ("l", lit "\x142")
-  , ("ae", lit "\230")
-  , ("AE", lit "\198")
-  , ("pounds", lit "\163")
-  , ("euro", lit "\8364")
-  , ("copyright", lit "\169")
-  , ("sect", lit "\167")
-  , ("`", accent grave <$> tok)
-  , ("'", accent acute <$> tok)
-  , ("^", accent hat <$> tok)
-  , ("~", accent circ <$> tok)
-  , ("\"", accent umlaut <$> tok)
+  , ("cc", lit "ç")
+  , ("cC", lit "Ç")
+  , ("aa", lit "å")
+  , ("AA", lit "Å")
+  , ("ss", lit "ß")
+  , ("o", lit "ø")
+  , ("O", lit "Ø")
+  , ("L", lit "Ł")
+  , ("l", lit "ł")
+  , ("ae", lit "æ")
+  , ("AE", lit "Æ")
+  , ("pounds", lit "£")
+  , ("euro", lit "€")
+  , ("copyright", lit "©")
+  , ("sect", lit "§")
+  , ("`", option (str "`") $ tok >>= accent grave)
+  , ("'", option (str "'") $ tok >>= accent acute)
+  , ("^", option (str "^") $ tok >>= accent hat)
+  , ("~", option (str "~") $ tok >>= accent circ)
+  , ("\"", option (str "\"") $ tok >>= accent umlaut)
   , ("i", lit "i")
+  , ("\\", linebreak <$ optional (bracketed *> optional sp))
+  , (",", pure mempty)
+  , ("@", pure mempty)
+  , (" ", lit "\160")
+  , ("bar", lit "|")
+  , ("textless", lit "<")
+  , ("textgreater", lit ">")
+  , ("thanks", (note . mconcat) <$> many (notFollowedBy (char '}') *> block))
+  , ("footnote", (note . mconcat) <$> many (notFollowedBy (char '}') *> block))
   ]
 
 lit :: String -> LP Inlines
 lit = pure . str
 
-accent :: (Char -> Char) -> Inlines -> Inlines
-accent f ils = fromList $
+accent :: (Char -> Char) -> Inlines -> LP Inlines
+accent f ils =
   case toList ils of
-       (Str (x:xs) : ys) -> (Str (f x : xs) : ys)
-       ys                -> ys
+       (Str (x:xs) : ys) -> return $ fromList $ (Str (f x : xs) : ys)
+       []                -> mzero
+       ys                -> return ils
 
 grave :: Char -> Char
 grave 'A' = 'À'
@@ -281,7 +303,8 @@ inlineChar :: LP Char
 inlineChar = satisfy $ \c ->
   not (c == '\\' || c == '$' || c == '%' || c == '^' || c == '_' ||
        c == '&'  || c == '~' || c == '#' || c == '{' || c == '}' ||
-       c == '^'  || c == ' ' || c == '\t' || c == '\n' )
+       c == '^'  || c == '\'' || c == '-' ||
+       c == ' ' || c == '\t' || c == '\n' )
 
 specialChars :: [Char]
 specialChars = "\\$%^&_~#{}^"
@@ -837,80 +860,8 @@ inline =  choice [ str
                  , comment
                  ] <?> "inline"
 
-
--- latex comment
-comment :: GenParser Char st Inline
-comment = try $ char '%' >> manyTill anyChar newline >> spaces >> return (Str "")
-
-accentedChar :: GenParser Char st Inline
-accentedChar = normalAccentedChar <|> specialAccentedChar
-
-normalAccentedChar :: GenParser Char st Inline
-normalAccentedChar = try $ do
-  char '\\'
-  accent <- oneOf "'`^\"~"
-  character <- (try $ char '{' >> letter >>~ char '}') <|> letter
-  let table = fromMaybe [] $ lookup character accentTable 
-  let result = case lookup accent table of
-                 Just num  -> chr num
-                 Nothing   -> '?'
-  return $ Str [result]
-
--- an association list of letters and association list of accents
--- and decimal character numbers.
-accentTable :: [(Char, [(Char, Int)])]
-accentTable = 
-  [ ('A', [('`', 192), ('\'', 193), ('^', 194), ('~', 195), ('"', 196)]),
-    ('E', [('`', 200), ('\'', 201), ('^', 202), ('"', 203)]),
-    ('I', [('`', 204), ('\'', 205), ('^', 206), ('"', 207)]),
-    ('N', [('~', 209)]),
-    ('O', [('`', 210), ('\'', 211), ('^', 212), ('~', 213), ('"', 214)]),
-    ('U', [('`', 217), ('\'', 218), ('^', 219), ('"', 220)]),
-    ('a', [('`', 224), ('\'', 225), ('^', 227), ('"', 228)]),
-    ('e', [('`', 232), ('\'', 233), ('^', 234), ('"', 235)]),
-    ('i', [('`', 236), ('\'', 237), ('^', 238), ('"', 239)]),
-    ('n', [('~', 241)]),
-    ('o', [('`', 242), ('\'', 243), ('^', 244), ('~', 245), ('"', 246)]),
-    ('u', [('`', 249), ('\'', 250), ('^', 251), ('"', 252)]) ]
-
--- nonescaped special characters
-unescapedChar :: GenParser Char st Inline
-unescapedChar = oneOf "`$^&_#{}[]|<>" >>= return . (\c -> Str [c])
-
-specialChar :: GenParser Char st Inline
-specialChar = choice [ spacer, interwordSpace, sentenceEnd,
-                       backslash, tilde, caret,
-                       bar, lt, gt, doubleQuote ]
-
-spacer :: GenParser Char st Inline
-spacer = try (string "\\,") >> return (Str "")
-
-sentenceEnd :: GenParser Char st Inline
-sentenceEnd = try (string "\\@") >> return (Str "")
-
-interwordSpace :: GenParser Char st Inline
-interwordSpace = try (string "\\ ") >> return (Str "\160")
-
-backslash :: GenParser Char st Inline
-backslash = try (string "\\textbackslash") >> optional (try $ string "{}") >> return (Str "\\")
-
 tilde :: GenParser Char st Inline
 tilde = try (string "\\ensuremath{\\sim}") >> return (Str "~")
-
-caret :: GenParser Char st Inline
-caret = try (string "\\^{}") >> return (Str "^")
-
-bar :: GenParser Char st Inline
-bar = try (string "\\textbar") >> optional (try $ string "{}") >> return (Str "\\")
-
-lt :: GenParser Char st Inline
-lt = try (string "\\textless") >> optional (try $ string "{}") >> return (Str "<")
-
-gt :: GenParser Char st Inline
-gt = try (string "\\textgreater") >> optional (try $ string "{}") >> return (Str ">")
-
-doubleQuote :: GenParser Char st Inline
-doubleQuote = char '"' >> return (Str "\"")
 
 code :: GenParser Char ParserState Inline
 code = code1 <|> code2 <|> code3 <|> lhsInlineCode
@@ -941,70 +892,6 @@ lhsInlineCode = try $ do
   char '|'
   result <- manyTill (noneOf "|\n") (char '|')
   return $ Code ("",["haskell"],[]) result
-
-apostrophe :: GenParser Char ParserState Inline
-apostrophe = char '\'' >> return (Str "\x2019")
-
-quoted :: GenParser Char ParserState Inline
-quoted = doubleQuoted <|> singleQuoted
-
-singleQuoted :: GenParser Char ParserState Inline
-singleQuoted = enclosed singleQuoteStart singleQuoteEnd inline >>=
-               return . Quoted SingleQuote . normalizeSpaces
-
-doubleQuoted :: GenParser Char ParserState Inline
-doubleQuoted = enclosed doubleQuoteStart doubleQuoteEnd inline >>=
-               return . Quoted DoubleQuote . normalizeSpaces
-
-singleQuoteStart :: GenParser Char st Char
-singleQuoteStart = char '`'
-
-singleQuoteEnd :: GenParser Char st ()
-singleQuoteEnd = try $ char '\'' >> notFollowedBy alphaNum
-
-doubleQuoteStart :: CharParser st String
-doubleQuoteStart = string "``"
-
-doubleQuoteEnd :: CharParser st String
-doubleQuoteEnd = try $ string "''"
-
-ellipses :: GenParser Char st Inline
-ellipses = try $ do
-  char '\\'
-  optional $ char 'l'
-  string "dots"
-  optional $ try $ string "{}"
-  return (Str "…")
-
-enDash :: GenParser Char st Inline
-enDash = try (string "--") >> return (Str "-")
-
-emDash :: GenParser Char st Inline
-emDash = try (string "---") >> return (Str "—")
-
-hyphen :: GenParser Char st Inline
-hyphen = char '-' >> return (Str "-")
-
-whitespace :: GenParser Char st Inline
-whitespace = many1 (oneOf " \t") >> return Space
-
-nonbreakingSpace :: GenParser Char st Inline
-nonbreakingSpace = char '~' >> return (Str "\160")
-
--- hard line break
-linebreak :: GenParser Char st Inline
-linebreak = try $ do
-  string "\\\\"
-  optional $ bracketedText '[' ']'  -- e.g. \\[10pt]
-  spaces
-  return LineBreak
-
-str :: GenParser Char st Inline
-str = many1 (noneOf specialChars) >>= return . Str
-
--- endline internal to paragraph
-endline :: GenParser Char st Inline
-endline = try $ newline >> notFollowedBy blankline >> return Space
 
 -- math
 math :: GenParser Char ParserState Inline
