@@ -132,7 +132,7 @@ inline = (mempty <$ comment)
      <|> (superscript <$> (char '^' *> tok))
      <|> (subscript <$> (char '_' *> tok))
      <|> (str <$> count 1 tildeEscape)
-     <|> (str <$> count 1 (satisfy (/='\n')))
+     <|> (str <$> count 1 (satisfy (\c -> c /= '\\' && c /='\n')))
 
 inlines :: LP Inlines
 inlines = mconcat <$> many (notFollowedBy (char '}') *> inline)
@@ -141,11 +141,23 @@ block :: LP Blocks
 block = (mempty <$ comment)
     <|> (mempty <$ blanklines)
 --    <|> environment
---    <|> blockCommand
+    <|> blockCommand
     <|> paragraph
 
 blocks :: LP Blocks
 blocks = mconcat <$> many block
+
+blockCommand :: LP Blocks
+blockCommand = try $ do
+  name <- anyControlSeq
+  case M.lookup name blockCommands of
+       Just p      -> p
+       Nothing     -> mzero
+
+blockCommands :: M.Map String (LP Blocks)
+blockCommands = M.fromList
+  [ ("par", pure mempty)
+  ]
 
 inlineCommand :: LP Inlines
 inlineCommand = try $ do
@@ -156,8 +168,7 @@ inlineCommand = try $ do
        Nothing     -> return mempty -- TODO handle raw
 
 isBlockCommand :: String -> Bool
-isBlockCommand "par" = True
-isBlockCommand _     = False
+isBlockCommand s = maybe False (const True) $ M.lookup s blockCommands
 
 inlineCommands :: M.Map String (LP Inlines)
 inlineCommands = M.fromList
@@ -308,9 +319,6 @@ inlineChar = satisfy $ \c ->
 
 specialChars :: [Char]
 specialChars = "\\$%^&_~#{}^"
-
-blockCommand :: LP Blocks
-blockCommand = undefined
 
 environment :: LP Blocks
 environment = undefined
