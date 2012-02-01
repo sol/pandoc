@@ -161,14 +161,14 @@ inlineCommands = M.fromList
   , ("textsuperscript", superscript <$> tok)
   , ("textsubscript", subscript <$> tok)
   , ("textbf", strong <$> tok)
-  , ("$", pure $ str "$")
-  , ("%", pure $ str "%")
-  , ("&", pure $ str "&")
-  , ("#", pure $ str "#")
-  , ("_", pure $ str "_")
-  , ("{", pure $ str "{")
-  , ("}", pure $ str "}")
-  , ("backslash", pure $ str "\\")
+  , ("$", lit "$")
+  , ("%", lit "%")
+  , ("&", lit "&")
+  , ("#", lit "#")
+  , ("_", lit "_")
+  , ("{", lit "{")
+  , ("}", lit "}")
+  , ("backslash", lit "\\")
   -- old TeX commands
   , ("em", emph <$> inlines)
   , ("it", emph <$> inlines)
@@ -194,36 +194,82 @@ inlineCommands = M.fromList
   , ("euro", lit "\8364")
   , ("copyright", lit "\169")
   , ("sect", lit "\167")
+  , ("`", accent grave <$> tok)
+  , ("'", accent acute <$> tok)
+  , ("^", accent hat <$> tok)
+  , ("~", accent circ <$> tok)
+  , ("\"", accent umlaut <$> tok)
+  , ("i", lit "i")
   ]
 
 lit :: String -> LP Inlines
 lit = pure . str
 
-{-
--- an association list of letters and association list of accents
--- and decimal character numbers.
-accentTable :: [(Char, [(Char, Int)])]
-accentTable = 
-  [ ('A', [('`', 192), ('\'', 193), ('^', 194), ('~', 195), ('"', 196)]),
-    ('E', [('`', 200), ('\'', 201), ('^', 202), ('"', 203)]),
-    ('I', [('`', 204), ('\'', 205), ('^', 206), ('"', 207)]),
-    ('N', [('~', 209)]),
-    ('O', [('`', 210), ('\'', 211), ('^', 212), ('~', 213), ('"', 214)]),
-    ('U', [('`', 217), ('\'', 218), ('^', 219), ('"', 220)]),
-    ('a', [('`', 224), ('\'', 225), ('^', 227), ('"', 228)]),
-    ('e', [('`', 232), ('\'', 233), ('^', 234), ('"', 235)]),
-    ('i', [('`', 236), ('\'', 237), ('^', 238), ('"', 239)]),
-    ('n', [('~', 241)]),
-    ('o', [('`', 242), ('\'', 243), ('^', 244), ('~', 245), ('"', 246)]),
-    ('u', [('`', 249), ('\'', 250), ('^', 251), ('"', 252)]) ]
+accent :: (Char -> Char) -> Inlines -> Inlines
+accent f ils = fromList $
+  case toList ils of
+       (Str (x:xs) : ys) -> (Str (f x : xs) : ys)
+       ys                -> ys
 
--- needs special treatment
-iuml :: GenParser Char st Inline
-iuml = try (string "\\\"") >> oneOfStrings ["\\i", "{\\i}"] >> 
-       return (Str [chr 239])
+grave :: Char -> Char
+grave 'A' = 'À'
+grave 'E' = 'È'
+grave 'I' = 'Ì'
+grave 'O' = 'Ò'
+grave 'U' = 'Ù'
+grave 'a' = 'à'
+grave 'e' = 'è'
+grave 'i' = 'ì'
+grave 'o' = 'ò'
+grave 'u' = 'ù'
+grave c   = c
 
+acute :: Char -> Char
+acute 'A' = 'Á'
+acute 'E' = 'É'
+acute 'I' = 'Í'
+acute 'O' = 'Ó'
+acute 'U' = 'Ú'
+acute 'a' = 'á'
+acute 'e' = 'é'
+acute 'i' = 'í'
+acute 'o' = 'ó'
+acute 'u' = 'ú'
+acute c = c
 
--}
+hat :: Char -> Char
+hat 'A' = 'Â'
+hat 'E' = 'Ê'
+hat 'I' = 'Î'
+hat 'O' = 'Ô'
+hat 'U' = 'Û'
+hat 'a' = 'ã'
+hat 'e' = 'ê'
+hat 'i' = 'î'
+hat 'o' = 'ô'
+hat 'u' = 'û'
+hat c = c
+
+circ :: Char -> Char
+circ 'A' = 'Ã'
+circ 'O' = 'Õ'
+circ 'o' = 'õ'
+circ 'N' = 'Ñ'
+circ 'n' = 'ñ'
+circ c   = c
+
+umlaut :: Char -> Char
+umlaut 'A' = 'Ä'
+umlaut 'E' = 'Ë'
+umlaut 'I' = 'Ï'
+umlaut 'O' = 'Ö'
+umlaut 'U' = 'Ü'
+umlaut 'a' = 'ä'
+umlaut 'e' = 'ë'
+umlaut 'i' = 'ï'
+umlaut 'o' = 'ö'
+umlaut 'u' = 'ü'
+umlaut c = c
 
 tok :: LP Inlines
 tok = grouped inline <|> inlineCommand <|> str <$> (count 1 $ inlineChar)
