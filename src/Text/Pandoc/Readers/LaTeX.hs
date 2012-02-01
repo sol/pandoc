@@ -79,7 +79,7 @@ controlSeq name = try $ do
 
 sp :: LP ()
 sp = skipMany1 $ satisfy (\c -> c == ' ' || c == '\t')
-              <|> (newline >>~ notFollowedBy blankline)
+              <|> (try $ newline >>~ notFollowedBy blankline)
 
 isLowerHex :: Char -> Bool
 isLowerHex x = x >= '0' && x <= '9' || x >= 'a' && x <= 'f'
@@ -107,15 +107,24 @@ comment = do
 grouped :: Monoid a => LP a -> LP a
 grouped parser = try $ do
   char '{'
-  optional sp
   res <- manyTill parser (char '}')
   return $ mconcat res
+
+braced :: LP String
+braced = try $ do
+  char '{'
+  manyTill anyChar (char '}')
 
 bracketed :: LP String
 bracketed = try $ do
   char '['
-  res <- manyTill anyChar (char ']')
-  return $ "[" ++ res ++ "]"
+  manyTill anyChar (char ']')
+
+mathDisplay :: LP String -> LP Inlines
+mathDisplay p = displayMath <$> (try p >>= applyMacros')
+
+mathInline :: LP String -> LP Inlines
+mathInline p = math <$> (try p >>= applyMacros')
 
 inline :: LP Inlines
 inline = (mempty <$ comment)
@@ -128,9 +137,11 @@ inline = (mempty <$ comment)
      <|> (char '`' *> option (str "‘") (str "“" <$ char '`'))
      <|> (char '\'' *> option (str "’") (str "”" <$ char '\''))
      <|> (str "\160" <$ char '~')
---     <|> math
+     <|> (mathDisplay $ string "$$" *> manyTill anyChar (try $ string "$$"))
+     <|> (mathInline  $ char '$' *> manyTill anyChar (char '$'))
      <|> (superscript <$> (char '^' *> tok))
      <|> (subscript <$> (char '_' *> tok))
+     <|> (failUnlessLHS *> char '|' *> doLHSverb)
      <|> (str <$> count 1 tildeEscape)
      <|> (str <$> count 1 (satisfy (\c -> c /= '\\' && c /='\n')))
 
@@ -140,7 +151,7 @@ inlines = mconcat <$> many (notFollowedBy (char '}') *> inline)
 block :: LP Blocks
 block = (mempty <$ comment)
     <|> (mempty <$ blanklines)
---    <|> environment
+    <|> environment
     <|> blockCommand
     <|> paragraph
 
@@ -157,6 +168,8 @@ blockCommand = try $ do
 blockCommands :: M.Map String (LP Blocks)
 blockCommands = M.fromList
   [ ("par", pure mempty)
+  , ("begin", mzero)   -- these are here so they won't be interpreted as inline
+  , ("end", mzero)
   ]
 
 inlineCommand :: LP Inlines
@@ -183,6 +196,11 @@ inlineCommands = M.fromList
   , ("textbf", strong <$> tok)
   , ("ldots", lit "…")
   , ("dots", lit "…")
+  , ("mdots", lit "…")
+  , ("sim", lit "~")
+  , ("(", mathInline $ manyTill anyChar (try $ string "\\)"))
+  , ("[", mathDisplay $ manyTill anyChar (try $ string "\\]"))
+  , ("ensuremath", mathInline braced)
   , ("$", lit "$")
   , ("%", lit "%")
   , ("&", lit "&")
@@ -190,7 +208,6 @@ inlineCommands = M.fromList
   , ("_", lit "_")
   , ("{", lit "{")
   , ("}", lit "}")
-  , ("backslash", lit "\\")
   -- old TeX commands
   , ("em", emph <$> inlines)
   , ("it", emph <$> inlines)
@@ -232,7 +249,18 @@ inlineCommands = M.fromList
   , ("textgreater", lit ">")
   , ("thanks", (note . mconcat) <$> many (notFollowedBy (char '}') *> block))
   , ("footnote", (note . mconcat) <$> many (notFollowedBy (char '}') *> block))
+  , ("verb", doverb)
+  , ("lstinline", doverb)
+  , ("texttt", (code . stringify . toList) <$> tok)
   ]
+
+doverb :: LP Inlines
+doverb = do
+  marker <- anyChar
+  code <$> manyTill (satisfy (/='\n')) (char marker)
+
+doLHSverb :: LP Inlines
+doLHSverb = codeWith ("",["haskell"],[]) <$> manyTill (satisfy (/='\n')) (char '|')
 
 lit :: String -> LP Inlines
 lit = pure . str
@@ -307,6 +335,9 @@ umlaut c = c
 tok :: LP Inlines
 tok = grouped inline <|> inlineCommand <|> str <$> (count 1 $ inlineChar)
 
+opt :: LP String
+opt = bracketed <* optional sp
+
 inlineText :: LP Inlines
 inlineText = str <$> many1 inlineChar
 
@@ -321,7 +352,18 @@ specialChars :: [Char]
 specialChars = "\\$%^&_~#{}^"
 
 environment :: LP Blocks
-environment = undefined
+environment = try $ do
+  controlSeq "begin"
+  name <- removeLeadingTrailingSpace <$> braced
+  case M.lookup name environments of
+       Just p      -> p
+       Nothing     -> return mempty -- TODO handle raw
+
+environments :: M.Map String (LP Blocks)
+environments = M.fromList
+  [ ("quote", blockQuote <$> blocks)
+  , ("quotation", blockQuote <$> blocks)
+  ]
 
 paragraph :: LP Blocks
 paragraph = (para . mconcat) <$> many1 inline
@@ -827,99 +869,6 @@ skipChar = do
   spaces
   return Null
 
-commentBlock :: GenParser Char st Block
-commentBlock = many1 (comment >> spaces) >> return Null
-
--- 
--- inline
---
-
-inline :: GenParser Char ParserState Inline
-inline =  choice [ str
-                 , endline
-                 , whitespace
-                 , quoted
-                 , apostrophe
-                 , strong
-                 , math
-                 , ellipses
-                 , emDash
-                 , enDash
-                 , hyphen
-                 , emph
-                 , strikeout
-                 , superscript
-                 , subscript
-                 , code
-                 , url
-                 , link
-                 , image
-                 , footnote
-                 , linebreak
-                 , accentedChar
-                 , nonbreakingSpace
-                 , cite
-                 , specialChar
-                 , ensureMath
-                 , rawLaTeXInline'
-                 , escapedChar
-                 , emptyGroup
-                 , unescapedChar
-                 , comment
-                 ] <?> "inline"
-
-tilde :: GenParser Char st Inline
-tilde = try (string "\\ensuremath{\\sim}") >> return (Str "~")
-
-code :: GenParser Char ParserState Inline
-code = code1 <|> code2 <|> code3 <|> lhsInlineCode
-
-code1 :: GenParser Char st Inline
-code1 = try $ do 
-  string "\\verb"
-  marker <- anyChar
-  result <- manyTill anyChar (char marker)
-  return $ Code nullAttr $ removeLeadingTrailingSpace result
-
-code2 :: GenParser Char st Inline
-code2 = try $ do
-  string "\\texttt{"
-  result <- manyTill (noneOf "\\\n~$%^&{}") (char '}')
-  return $ Code nullAttr result
-
-code3 :: GenParser Char st Inline
-code3 = try $ do 
-  string "\\lstinline"
-  marker <- anyChar
-  result <- manyTill anyChar (char marker)
-  return $ Code nullAttr $ removeLeadingTrailingSpace result
-
-lhsInlineCode :: GenParser Char ParserState Inline
-lhsInlineCode = try $ do
-  failUnlessLHS
-  char '|'
-  result <- manyTill (noneOf "|\n") (char '|')
-  return $ Code ("",["haskell"],[]) result
-
--- math
-math :: GenParser Char ParserState Inline
-math =   (math3 >>= applyMacros' >>= return . Math DisplayMath)
-     <|> (math1 >>= applyMacros' >>= return . Math InlineMath)
-     <|> (math2 >>= applyMacros' >>= return . Math InlineMath)
-     <|> (math4 >>= applyMacros' >>= return . Math DisplayMath)
-     <|> (math5 >>= applyMacros' >>= return . Math DisplayMath)
-     <|> (math6 >>= applyMacros' >>= return . Math DisplayMath)
-     <?> "math"
-
-math1 :: GenParser Char st String 
-math1 = try $ char '$' >> manyTill anyChar (char '$')
-
-math2 :: GenParser Char st String
-math2 = try $ string "\\(" >> manyTill anyChar (try $ string "\\)")
-
-math3 :: GenParser Char st String 
-math3 = try $ char '$' >> math1 >>~ char '$'
-
 math4 :: GenParser Char st String
 math4 = try $ do
   name <- begin "displaymath" <|> begin "equation" <|> begin "equation*" <|>
@@ -927,8 +876,6 @@ math4 = try $ do
              begin "multline" <|> begin "multline*"
   manyTill anyChar (end name)
 
-math5 :: GenParser Char st String
-math5 = try $ (string "\\[") >> spaces >> manyTill anyChar (try $ string "\\]")
 
 math6 :: GenParser Char st String
 math6 = try $ do
@@ -937,12 +884,6 @@ math6 = try $ do
              begin "split" <|> begin "aligned" <|> begin "alignedat"
   res <- manyTill anyChar (end name)
   return $ filter (/= '&') res  -- remove alignment codes
-
-ensureMath :: GenParser Char st Inline
-ensureMath = try $ do
-  (n, _, args) <- command
-  guard $ n == "ensuremath" && not (null args)
-  return $ Math InlineMath $ tail $ init $ head args
 
 --
 -- links and images
