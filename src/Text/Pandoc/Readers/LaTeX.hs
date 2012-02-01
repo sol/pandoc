@@ -378,66 +378,6 @@ rawLaTeXEnvironment' = undefined
 
 
 {-
--- characters with special meaning
-specialChars :: [Char]
-specialChars = "\\`$%^&_~#{}[]\n \t|<>'\"-"
-
---
--- utility functions
---
-
--- | Returns text between brackets and its matching pair.
-bracketedText :: Char -> Char -> GenParser Char st [Char]
-bracketedText openB closeB = do
-  result <- charsInBalanced openB closeB anyChar
-  return $ [openB] ++ result ++ [closeB]
-
--- | Returns an option or argument of a LaTeX command.
-optOrArg :: GenParser Char st [Char]
-optOrArg = try $ spaces >> (bracketedText '{' '}' <|> bracketedText '[' ']')
-
--- | True if the string begins with '{'.
-isArg :: [Char] -> Bool
-isArg ('{':_) = True
-isArg _       = False
-
--- | Returns list of options and arguments of a LaTeX command.
-commandArgs :: GenParser Char st [[Char]]
-commandArgs = many optOrArg
-
--- | Parses LaTeX command, returns (name, star, list of options or arguments).
-command :: GenParser Char st ([Char], [Char], [[Char]])
-command = do
-  char '\\'
-  name <- many1 letter
-  star <- option "" (string "*")  -- some commands have starred versions
-  args <- commandArgs
-  return (name, star, args)
-
-begin :: [Char] -> GenParser Char st [Char]
-begin name = try $ do
-  string "\\begin"
-  spaces
-  char '{'
-  string name
-  char '}'
-  optional commandArgs
-  spaces
-  return name
-
-end :: [Char] -> GenParser Char st [Char]
-end name = try $ do
-  string "\\end"
-  spaces
-  char '{'
-  string name
-  char '}'
-  return name
-
--- | Returns a list of block elements containing the contents of an
--- environment.
-environment :: [Char] -> GenParser Char ParserState [Block]
-environment name = try $ begin name >> spaces >> manyTill block (end name) >>~ spaces
 
 anyEnvironment :: GenParser Char ParserState Block
 anyEnvironment =  try $ do
