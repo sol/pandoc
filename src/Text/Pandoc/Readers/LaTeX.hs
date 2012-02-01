@@ -32,7 +32,7 @@ module Text.Pandoc.Readers.LaTeX ( readLaTeX,
                                    rawLaTeXEnvironment'
                                  ) where
 
-import Text.ParserCombinators.Parsec
+import Text.ParserCombinators.Parsec hiding ((<|>), space, many, optional)
 import Text.Pandoc.Definition
 import Text.Pandoc.Shared
 import Text.Pandoc.Parsing
@@ -42,13 +42,19 @@ import Data.List ( intercalate, isPrefixOf, isSuffixOf )
 import Control.Monad
 import Text.Pandoc.Builder
 import Data.Char (isLetter)
+import Control.Applicative
 import Data.Monoid
+import qualified Data.Map as M
 
 -- | Parse LaTeX from string and return 'Pandoc' document.
 readLaTeX :: ParserState   -- ^ Parser state, including options for parser
           -> String        -- ^ String to parse (assumes @'\n'@ line endings)
           -> Pandoc
 readLaTeX = readWith parseLaTeX
+
+parseLaTeX = do
+  bs <- blocks
+  return $ doc bs
 
 type LP = GenParser Char ParserState
 
@@ -58,9 +64,9 @@ anyControlSeq = do
   next <- option '\n' anyChar
   name <- case next of
                '\n'           -> return ""
-               c | isLetter c -> (c:) `fmap` many letter
+               c | isLetter c -> (c:) <$> many letter
                  | otherwise  -> return [c]
-  skipBlank
+  optional sp
   return name
 
 controlSeq :: String -> LP String
@@ -68,16 +74,12 @@ controlSeq name = try $ do
   char '\\'
   guard $ not (null name) && (length name == 1 || all isLetter name)
   string name
-  skipBlank
+  optional sp
   return name
 
 sp :: LP ()
-sp = do
-  satisfy (\c -> c == ' ' || c == '\t' || c == '\n')
-  skipBlank
-
-skipBlank :: LP ()
-skipBlank = spaces >> skipMany (comment >> spaces)
+sp = skipMany1 $ satisfy (\c -> c == ' ' || c == '\t')
+              <|> (newline >>~ notFollowedBy blankline)
 
 isLowerHex :: Char -> Bool
 isLowerHex x = x >= '0' && x <= '9' || x >= 'a' && x <= 'f'
@@ -103,24 +105,152 @@ comment = do
   return ()
 
 grouped :: Monoid a => LP a -> LP a
-grouped parser = do
+grouped parser = try $ do
   char '{'
-  skipBlank
-  res <- manyTill (parser >>~ skipBlank) (char '}')
+  optional sp
+  res <- manyTill parser (char '}')
   return $ mconcat res
 
 inline :: LP Inlines
-inline = undefined
--- something like:  comment <|> space <|> inlinecommand
+inline = (mempty <$ comment)
+     <|> (space  <$ sp)
+     <|> inlineText
+     <|> inlineCommand
+--     <|> dash
+--     <|> lquotes
+--     <|> rquotes
+     <|> grouped inline
+--     <|> nbsp
+--     <|> math
+--     <|> super
+--     <|> sub
+     <|> (str . (:[]) <$> tildeEscape)
+--     <|> misplaced
+
+inlines :: LP Inlines
+inlines = mconcat <$> many (notFollowedBy (char '}') *> inline)
 
 block :: LP Blocks
-block = undefined
--- something like:  comment <|> space <|> blockcommand <|> environment
--- where environment e.g. looks up a parser in a table
+block = (mempty <$ comment)
+    <|> (mempty <$ blanklines)
+    <|> environment
+    <|> blockCommand
+    <|> paragraph
+
+blocks :: LP Blocks
+blocks = mconcat <$> many block
+
+inlineCommand :: LP Inlines
+inlineCommand = try $ do
+  name <- anyControlSeq
+  guard $ not $ isBlockCommand name
+  case M.lookup name inlineCommands of
+       Just p      -> p
+       Nothing     -> return mempty -- TODO handle raw
+
+isBlockCommand :: String -> Bool
+isBlockCommand "par" = True
+isBlockCommand _     = False
+
+inlineCommands :: M.Map String (LP Inlines)
+inlineCommands = M.fromList
+  [ ("emph", emph <$> tok)
+  , ("textit", emph <$> tok)
+  , ("textsc", smallcaps <$> tok)
+  , ("sout", strikeout <$> tok)
+  , ("textsuperscript", superscript <$> tok)
+  , ("textsubscript", subscript <$> tok)
+  , ("textbf", strong <$> tok)
+  , ("$", pure $ str "$")
+  , ("%", pure $ str "%")
+  , ("&", pure $ str "&")
+  , ("#", pure $ str "#")
+  , ("_", pure $ str "_")
+  , ("{", pure $ str "{")
+  , ("}", pure $ str "}")
+  , ("backslash", pure $ str "\\")
+  -- old TeX commands
+  , ("em", emph <$> inlines)
+  , ("it", emph <$> inlines)
+  , ("itshape", emph <$> inlines)
+  , ("sl", emph <$> inlines)
+  , ("slshape", emph <$> inlines)
+  , ("scshape", smallcaps <$> inlines)
+  , ("bf", strong <$> inlines)
+  , ("bfseries", strong <$> inlines)
+  , ("/", pure mempty) -- italic correction
+  , ("cc", lit "\231")
+  , ("cC", lit "\199")
+  , ("aa", lit "\229")
+  , ("AA", lit "\197")
+  , ("ss", lit "\223")
+  , ("o", lit "\248")
+  , ("O", lit "\216")
+  , ("L", lit "\x141")
+  , ("l", lit "\x142")
+  , ("ae", lit "\230")
+  , ("AE", lit "\198")
+  , ("pounds", lit "\163")
+  , ("euro", lit "\8364")
+  , ("copyright", lit "\169")
+  , ("sect", lit "\167")
+  ]
+
+lit :: String -> LP Inlines
+lit = pure . str
+
+{-
+-- an association list of letters and association list of accents
+-- and decimal character numbers.
+accentTable :: [(Char, [(Char, Int)])]
+accentTable = 
+  [ ('A', [('`', 192), ('\'', 193), ('^', 194), ('~', 195), ('"', 196)]),
+    ('E', [('`', 200), ('\'', 201), ('^', 202), ('"', 203)]),
+    ('I', [('`', 204), ('\'', 205), ('^', 206), ('"', 207)]),
+    ('N', [('~', 209)]),
+    ('O', [('`', 210), ('\'', 211), ('^', 212), ('~', 213), ('"', 214)]),
+    ('U', [('`', 217), ('\'', 218), ('^', 219), ('"', 220)]),
+    ('a', [('`', 224), ('\'', 225), ('^', 227), ('"', 228)]),
+    ('e', [('`', 232), ('\'', 233), ('^', 234), ('"', 235)]),
+    ('i', [('`', 236), ('\'', 237), ('^', 238), ('"', 239)]),
+    ('n', [('~', 241)]),
+    ('o', [('`', 242), ('\'', 243), ('^', 244), ('~', 245), ('"', 246)]),
+    ('u', [('`', 249), ('\'', 250), ('^', 251), ('"', 252)]) ]
+
+-- needs special treatment
+iuml :: GenParser Char st Inline
+iuml = try (string "\\\"") >> oneOfStrings ["\\i", "{\\i}"] >> 
+       return (Str [chr 239])
+
+
+-}
+
+tok :: LP Inlines
+tok = grouped inline <|> inlineCommand <|> str <$> (count 1 $ inlineChar)
+
+inlineText :: LP Inlines
+inlineText = str <$> many1 inlineChar
+
+inlineChar :: LP Char
+inlineChar = satisfy $ \c ->
+  not (c == '\\' || c == '$' || c == '%' || c == '^' || c == '_' ||
+       c == '&'  || c == '~' || c == '#' || c == '{' || c == '}' ||
+       c == '^'  || c == ' ' || c == '\t' || c == '\n' )
+
+specialChars :: [Char]
+specialChars = "\\$%^&_~#{}^"
+
+blockCommand :: LP Blocks
+blockCommand = undefined
+
+environment :: LP Blocks
+environment = undefined
+
+paragraph :: LP Blocks
+paragraph = (para . mconcat) <$> many1 inline
+
 
 -------
-
-parseLaTeX = undefined
 
 rawLaTeXInline = undefined
 
@@ -697,81 +827,6 @@ accentTable =
     ('o', [('`', 242), ('\'', 243), ('^', 244), ('~', 245), ('"', 246)]),
     ('u', [('`', 249), ('\'', 250), ('^', 251), ('"', 252)]) ]
 
-specialAccentedChar :: GenParser Char st Inline
-specialAccentedChar = choice [ ccedil, aring, iuml, szlig, aelig, lslash,
-                               oslash, pound, euro, copyright, sect ]
-
-ccedil :: GenParser Char st Inline
-ccedil = try $ do
-  char '\\'
-  letter' <- oneOfStrings ["cc", "cC"]
-  notFollowedBy letter
-  let num = if letter' == "cc" then 231 else 199
-  return $ Str [chr num]
-
-aring :: GenParser Char st Inline
-aring = try $ do
-  char '\\'
-  letter' <- oneOfStrings ["aa", "AA"]
-  notFollowedBy letter
-  let num = if letter' == "aa" then 229 else 197
-  return $ Str [chr num]
-
-iuml :: GenParser Char st Inline
-iuml = try (string "\\\"") >> oneOfStrings ["\\i", "{\\i}"] >> 
-       return (Str [chr 239])
-
-szlig :: GenParser Char st Inline
-szlig = try (string "\\ss") >> notFollowedBy letter >> return (Str [chr 223])
-
-oslash :: GenParser Char st Inline
-oslash = try $ do
-  char '\\'
-  letter' <- choice [char 'o', char 'O']
-  notFollowedBy letter
-  let num = if letter' == 'o' then 248 else 216
-  return $ Str [chr num]
-
-lslash :: GenParser Char st Inline
-lslash = try $ do
-  cmd <- oneOfStrings ["{\\L}","{\\l}"]
-       <|> (oneOfStrings ["\\L ","\\l "] >>~ notFollowedBy letter)
-  return $ if 'l' `elem` cmd
-              then Str "\x142"
-              else Str "\x141"
-
-aelig :: GenParser Char st Inline
-aelig = try $ do
-  char '\\'
-  letter' <- oneOfStrings ["ae", "AE"]
-  notFollowedBy letter
-  let num = if letter' == "ae" then 230 else 198
-  return $ Str [chr num]
-
-pound :: GenParser Char st Inline
-pound = try (string "\\pounds" >> notFollowedBy letter) >> return (Str [chr 163])
-
-euro :: GenParser Char st Inline
-euro = try (string "\\euro" >> notFollowedBy letter) >> return (Str [chr 8364])
-
-copyright :: GenParser Char st Inline
-copyright = try (string "\\copyright" >> notFollowedBy letter) >> return (Str [chr 169])
-
-sect :: GenParser Char st Inline
-sect = try (string "\\S" >> notFollowedBy letter) >> return (Str [chr 167])
-
-escapedChar :: GenParser Char st Inline
-escapedChar = do
-  result <- escaped (oneOf specialChars)
-  return $ if result == '\n' then Str " " else Str [result]
-
-emptyGroup :: GenParser Char st Inline
-emptyGroup = try $ do
-  char '{'
-  spaces
-  char '}'
-  return $ Str ""
-
 -- nonescaped special characters
 unescapedChar :: GenParser Char st Inline
 unescapedChar = oneOf "`$^&_#{}[]|<>" >>= return . (\c -> Str [c])
@@ -841,24 +896,6 @@ lhsInlineCode = try $ do
   result <- manyTill (noneOf "|\n") (char '|')
   return $ Code ("",["haskell"],[]) result
 
-emph :: GenParser Char ParserState Inline
-emph = try $ oneOfStrings [ "\\emph{", "\\textit{" ] >>
-             manyTill inline (char '}') >>= return . Emph
-
-strikeout :: GenParser Char ParserState Inline
-strikeout = try $ string "\\sout{" >> manyTill inline (char '}') >>=
-                  return . Strikeout
-
-superscript :: GenParser Char ParserState Inline
-superscript = try $ string "\\textsuperscript{" >> 
-                    manyTill inline (char '}') >>= return . Superscript
-
--- note: \textsubscript isn't a standard latex command, but we use
--- a defined version in pandoc.
-subscript :: GenParser Char ParserState Inline
-subscript = try $ string "\\textsubscript{" >> manyTill inline (char '}') >>=
-                  return . Subscript
-
 apostrophe :: GenParser Char ParserState Inline
 apostrophe = char '\'' >> return (Str "\x2019")
 
@@ -901,10 +938,6 @@ emDash = try (string "---") >> return (Str "—")
 
 hyphen :: GenParser Char st Inline
 hyphen = char '-' >> return (Str "-")
-
-strong :: GenParser Char ParserState Inline
-strong = try (string "\\textbf{") >> manyTill inline (char '}') >>=
-         return . Strong
 
 whitespace :: GenParser Char st Inline
 whitespace = many1 (oneOf " \t") >> return Space
