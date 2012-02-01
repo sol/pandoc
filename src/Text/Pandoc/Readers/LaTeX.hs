@@ -170,6 +170,7 @@ blockCommands = M.fromList
   [ ("par", pure mempty)
   , ("begin", mzero)   -- these are here so they won't be interpreted as inline
   , ("end", mzero)
+  , ("item", mzero)
   ]
 
 inlineCommand :: LP Inlines
@@ -363,7 +364,39 @@ environments :: M.Map String (LP Blocks)
 environments = M.fromList
   [ ("quote", blockQuote <$> blocks)
   , ("quotation", blockQuote <$> blocks)
+  , ("itemize", bulletList <$> many item)
+  , ("enumerate", orderedList <$> many item)
+  -- TODO fix behavior of math environments
+  -- eg. align should be displaymath with aligned/gather
+  , ("displaymath", mathEnv "displaymath")
+  , ("equation", mathEnv "equation")
+  , ("equation*", mathEnv "equation*")
+  , ("gather", mathEnv "gather")
+  , ("gather*", mathEnv "gather*")
+  , ("gathered", mathEnv "gathered")
+  , ("multiline", mathEnv "multiline")
+  , ("multiline*", mathEnv "multiline*")
+  , ("eqnarray", mathEnv "eqnarray")
+  , ("eqnarray*", mathEnv "eqnarray*")
+  , ("align", mathEnv "align")
+  , ("align*", mathEnv "align*")
+  , ("aligned", mathEnv "aligned")
+  , ("alignat", mathEnv "alignat")
+  , ("alignat*", mathEnv "alignat*")
+  , ("split", mathEnv "split")
+  , ("alignedat", mathEnv "alignedat")
   ]
+
+item :: LP Blocks
+item = spaces *> controlSeq "item" *> blocks
+
+mathEnv :: String -> LP Blocks
+mathEnv name = para  <$> mathDisplay (verbEnv name)
+
+verbEnv :: String -> LP String
+verbEnv name = do
+  let endEnv = controlSeq "end" *> string ("{" ++ name ++ "}")
+  manyTill anyChar endEnv
 
 paragraph :: LP Blocks
 paragraph = (para . mconcat) <$> many1 inline
@@ -799,31 +832,6 @@ unknownCommand = try $ do
 
 commandsToIgnore :: [String]
 commandsToIgnore = ["special","pdfannot","pdfstringdef", "index","bibliography"]
-
-skipChar :: GenParser Char ParserState Block
-skipChar = do
-  satisfy (/='\\') <|>
-    (notFollowedBy' (try $
-                     string "\\begin" >> spaces >> string "{document}") >>
-     anyChar)
-  spaces
-  return Null
-
-math4 :: GenParser Char st String
-math4 = try $ do
-  name <- begin "displaymath" <|> begin "equation" <|> begin "equation*" <|>
-           begin "gather" <|> begin "gather*" <|> begin "gathered" <|>
-             begin "multline" <|> begin "multline*"
-  manyTill anyChar (end name)
-
-
-math6 :: GenParser Char st String
-math6 = try $ do
-  name <- begin "eqnarray" <|> begin "eqnarray*" <|> begin "align" <|>
-           begin "align*" <|> begin "alignat" <|> begin "alignat*" <|>
-             begin "split" <|> begin "aligned" <|> begin "alignedat"
-  res <- manyTill anyChar (end name)
-  return $ filter (/= '&') res  -- remove alignment codes
 
 --
 -- links and images
