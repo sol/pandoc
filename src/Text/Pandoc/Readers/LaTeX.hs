@@ -124,8 +124,11 @@ bracketed = try $ do
   char '['
   manyTill anyChar (char ']')
 
+trim :: String -> String
+trim = removeLeadingTrailingSpace
+
 mathDisplay :: LP String -> LP Inlines
-mathDisplay p = displayMath <$> (try p >>= applyMacros')
+mathDisplay p = displayMath <$> (try p >>= applyMacros' . trim)
 
 mathInline :: LP String -> LP Inlines
 mathInline p = math <$> (try p >>= applyMacros')
@@ -412,7 +415,7 @@ env :: String -> LP a -> LP a
 env name p = p <* (controlSeq "end" *> braced >>= guard . (== name))
 
 mathEnv :: String -> LP Blocks
-mathEnv name = para  <$> mathDisplay (verbEnv name)
+mathEnv name = para <$> mathDisplay (verbEnv name)
 
 verbEnv :: String -> LP String
 verbEnv name = do
