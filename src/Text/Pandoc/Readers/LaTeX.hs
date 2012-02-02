@@ -179,7 +179,9 @@ blockCommands = M.fromList
   , ("begin", mzero)   -- these are here so they won't be interpreted as inline
   , ("end", mzero)
   , ("item", mzero)
-  , ("documentclass", optional opt *> braced *> skipMany (notFollowedBy' (try $ string "\\begin{document}") *> anyChar) *> pure mempty) -- TODO
+  , ("documentclass", optional opt *> braced *>
+      skipMany (notFollowedBy' (try $ string "\\begin{document}") *> anyChar) *>
+      pure mempty) -- TODO
   , ("newcommand", braced *> optional opt *> tok *> pure mempty) -- TODO
   , ("renewcommand", braced *> optional opt *> tok *> pure mempty)
   , ("newenvironment", braced *> optional opt *> tok *> tok *> pure mempty)
@@ -389,23 +391,19 @@ environments = M.fromList
   , ("lstlisting", codeBlock <$> (verbEnv "listlisting"))
   -- TODO fix behavior of math environments
   -- eg. align should be displaymath with aligned/gather
-  , ("displaymath", mathEnv "displaymath")
-  , ("equation", mathEnv "equation")
-  , ("equation*", mathEnv "equation*")
-  , ("gather", mathEnv "gather")
-  , ("gather*", mathEnv "gather*")
-  , ("gathered", mathEnv "gathered")
-  , ("multiline", mathEnv "multiline")
-  , ("multiline*", mathEnv "multiline*")
-  , ("eqnarray", mathEnv "eqnarray")
-  , ("eqnarray*", mathEnv "eqnarray*")
-  , ("align", mathEnv "align")
-  , ("align*", mathEnv "align*")
-  , ("aligned", mathEnv "aligned")
-  , ("alignat", mathEnv "alignat")
-  , ("alignat*", mathEnv "alignat*")
-  , ("split", mathEnv "split")
-  , ("alignedat", mathEnv "alignedat")
+  , ("displaymath", mathEnv Nothing "displaymath")
+  , ("equation", mathEnv Nothing "equation")
+  , ("equation*", mathEnv Nothing "equation*")
+  , ("gather", mathEnv (Just "gathered") "gather")
+  , ("gather*", mathEnv (Just "gathered") "gather*")
+  , ("multiline", mathEnv (Just "gathered") "multiline")
+  , ("multiline*", mathEnv (Just "gathered") "multiline*")
+  , ("eqnarray", mathEnv (Just "aligned*") "eqnarray")
+  , ("eqnarray*", mathEnv (Just "aligned*") "eqnarray*")
+  , ("align", mathEnv (Just "aligned*") "align")
+  , ("align*", mathEnv (Just "aligned*") "align*")
+  , ("alignat", mathEnv (Just "aligned*") "alignat")
+  , ("alignat*", mathEnv (Just "aligned*") "alignat*")
   ]
 
 item :: LP Blocks
@@ -414,8 +412,12 @@ item = blocks *> controlSeq "item" *> optional opt *> blocks
 env :: String -> LP a -> LP a
 env name p = p <* (controlSeq "end" *> braced >>= guard . (== name))
 
-mathEnv :: String -> LP Blocks
-mathEnv name = para <$> mathDisplay (verbEnv name)
+mathEnv :: Maybe String -> String -> LP Blocks
+mathEnv innerEnv name = para <$> mathDisplay (inner <$> verbEnv name)
+   where inner x = case innerEnv of
+                      Nothing    -> x
+                      Just inner -> "\\begin{" ++ inner ++ "}\n" ++ x ++
+                                    "\\end{" ++ inner ++ "}"
 
 verbEnv :: String -> LP String
 verbEnv name = do
