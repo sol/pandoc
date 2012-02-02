@@ -150,7 +150,7 @@ inline = (mempty <$ comment)
      <|> (subscript <$> (char '_' *> tok))
      <|> (failUnlessLHS *> char '|' *> doLHSverb)
      <|> (str <$> count 1 tildeEscape)
-     <|> (str <$> count 1 (satisfy (\c -> c /= '\\' && c /='\n')))
+     <|> (str <$> count 1 (satisfy (\c -> c /= '\\' && c /='\n' && c /='}'))) -- TODO
 
 inlines :: LP Inlines
 inlines = mconcat <$> many (notFollowedBy (char '}') *> inline)
@@ -279,8 +279,8 @@ inlineCommands = M.fromList
   , ("bar", lit "|")
   , ("textless", lit "<")
   , ("textgreater", lit ">")
-  , ("thanks", (note . mconcat) <$> many (notFollowedBy (char '}') *> block))
-  , ("footnote", (note . mconcat) <$> many (notFollowedBy (char '}') *> block))
+  , ("thanks", (note . mconcat) <$> (char '{' *> manyTill block (char '}')))
+  , ("footnote", (note . mconcat) <$> (char '{' *> manyTill block (char '}')))
   , ("verb", doverb)
   , ("lstinline", doverb)
   , ("texttt", (code . stringify . toList) <$> tok)
