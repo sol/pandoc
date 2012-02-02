@@ -176,6 +176,12 @@ blockCommand = try $ do
 blockCommands :: M.Map String (LP Blocks)
 blockCommands = M.fromList
   [ ("par", pure mempty)
+  , ("chapter", section 0)
+  , ("section", section 1)
+  , ("subsection", section 2)
+  , ("subsubsection", section 3)
+  , ("paragraph", section 4)
+  , ("subparagraph", section 5)
   , ("begin", mzero)   -- these are here so they won't be interpreted as inline
   , ("end", mzero)
   , ("item", mzero)
@@ -187,6 +193,16 @@ blockCommands = M.fromList
   , ("newenvironment", braced *> optional opt *> tok *> tok *> pure mempty)
   , ("renewenvironment", braced *> optional opt *> tok *> tok *> pure mempty)
   ]
+
+section :: Int -> LP Blocks
+section lvl = do
+  hasChapters <- stateHasChapters `fmap` getState
+  let lvl' = if hasChapters then lvl + 1 else lvl
+  optional (char '*')
+  optional sp
+  optional opt
+  contents <- grouped inline
+  return $ header lvl' contents
 
 inlineCommand :: LP Inlines
 inlineCommand = try $ do
@@ -389,8 +405,6 @@ environments = M.fromList
   , ("verbatim", codeBlock <$> (verbEnv "verbatim"))
   , ("Verbatim", codeBlock <$> (verbEnv "Verbatim"))
   , ("lstlisting", codeBlock <$> (verbEnv "listlisting"))
-  -- TODO fix behavior of math environments
-  -- eg. align should be displaymath with aligned/gather
   , ("displaymath", mathEnv Nothing "displaymath")
   , ("equation", mathEnv Nothing "equation")
   , ("equation*", mathEnv Nothing "equation*")
