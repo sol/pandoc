@@ -37,7 +37,7 @@ import Text.Pandoc.Definition
 import Text.Pandoc.Shared
 import Text.Pandoc.Parsing
 import Data.Maybe ( fromMaybe )
-import Data.Char ( chr, toUpper, ord )
+import Data.Char ( chr, ord )
 import Data.List ( intercalate, isPrefixOf, isSuffixOf )
 import Control.Monad
 import Text.Pandoc.Builder
@@ -111,9 +111,13 @@ grouped parser = try $ do
   return $ mconcat res
 
 braced :: LP String
-braced = try $ do
-  char '{'
-  manyTill anyChar (char '}')
+braced = char '{' *> (concat <$> manyTill
+         (  many1 (satisfy (\c -> c /= '\\' && c /= '}' && c /= '{'))
+        <|> try (string "\\}")
+        <|> try (string "\\{")
+        <|> ((\x -> "{" ++ x ++ "}") <$> braced)
+        <|> count 1 anyChar
+         ) (char '}'))
 
 bracketed :: LP String
 bracketed = try $ do
@@ -153,6 +157,7 @@ block = (mempty <$ comment)
     <|> (mempty <$ blanklines)
     <|> environment
     <|> blockCommand
+    <|> grouped block
     <|> paragraph
 
 blocks :: LP Blocks
@@ -171,6 +176,11 @@ blockCommands = M.fromList
   , ("begin", mzero)   -- these are here so they won't be interpreted as inline
   , ("end", mzero)
   , ("item", mzero)
+  , ("documentclass", optional opt *> braced *> skipMany (notFollowedBy' (try $ string "\\begin{document}") *> anyChar) *> pure mempty) -- TODO
+  , ("newcommand", braced *> optional opt *> tok *> pure mempty) -- TODO
+  , ("renewcommand", braced *> optional opt *> tok *> pure mempty)
+  , ("newenvironment", braced *> optional opt *> tok *> tok *> pure mempty)
+  , ("renewenvironment", braced *> optional opt *> tok *> tok *> pure mempty)
   ]
 
 inlineCommand :: LP Inlines
@@ -179,7 +189,7 @@ inlineCommand = try $ do
   guard $ not $ isBlockCommand name
   case M.lookup name inlineCommands of
        Just p      -> p
-       Nothing     -> return mempty -- TODO handle raw
+       Nothing     -> return (str $ "@" ++ name) -- TODO handle raw
 
 isBlockCommand :: String -> Bool
 isBlockCommand s = maybe False (const True) $ M.lookup s blockCommands
@@ -201,7 +211,7 @@ inlineCommands = M.fromList
   , ("sim", lit "~")
   , ("(", mathInline $ manyTill anyChar (try $ string "\\)"))
   , ("[", mathDisplay $ manyTill anyChar (try $ string "\\]"))
-  , ("ensuremath", mathInline braced)
+  , ("ensuremath", mathInline $ braced)
   , ("$", lit "$")
   , ("%", lit "%")
   , ("&", lit "&")
@@ -235,11 +245,11 @@ inlineCommands = M.fromList
   , ("euro", lit "€")
   , ("copyright", lit "©")
   , ("sect", lit "§")
-  , ("`", option (str "`") $ tok >>= accent grave)
-  , ("'", option (str "'") $ tok >>= accent acute)
-  , ("^", option (str "^") $ tok >>= accent hat)
-  , ("~", option (str "~") $ tok >>= accent circ)
-  , ("\"", option (str "\"") $ tok >>= accent umlaut)
+  , ("`", option (str "`") $ try $ tok >>= accent grave)
+  , ("'", option (str "'") $ try $ tok >>= accent acute)
+  , ("^", option (str "^") $ try $ tok >>= accent hat)
+  , ("~", option (str "~") $ try $ tok >>= accent circ)
+  , ("\"", option (str "\"") $ try $ tok >>= accent umlaut)
   , ("i", lit "i")
   , ("\\", linebreak <$ optional (bracketed *> optional sp))
   , (",", pure mempty)
@@ -334,7 +344,7 @@ umlaut 'u' = 'ü'
 umlaut c = c
 
 tok :: LP Inlines
-tok = grouped inline <|> inlineCommand <|> str <$> (count 1 $ inlineChar)
+tok = try $ grouped inline <|> inlineCommand <|> str <$> (count 1 $ inlineChar)
 
 opt :: LP String
 opt = bracketed <* optional sp
@@ -353,19 +363,27 @@ specialChars :: [Char]
 specialChars = "\\$%^&_~#{}^"
 
 environment :: LP Blocks
-environment = try $ do
+environment = do
   controlSeq "begin"
-  name <- removeLeadingTrailingSpace <$> braced
+  name <- braced
   case M.lookup name environments of
        Just p      -> p
-       Nothing     -> return mempty -- TODO handle raw
+       Nothing     -> try (blockQuote <$> (env name blocks))
+                     <|> codeBlock <$> (verbEnv name)
+      -- TODO handle raw
 
 environments :: M.Map String (LP Blocks)
 environments = M.fromList
-  [ ("quote", blockQuote <$> blocks)
-  , ("quotation", blockQuote <$> blocks)
-  , ("itemize", bulletList <$> many item)
-  , ("enumerate", orderedList <$> many item)
+  [ ("document", env "document" blocks)
+  , ("quote", blockQuote <$> env "quote" blocks)
+  , ("quotation", blockQuote <$> env "quotation" blocks)
+  , ("itemize", bulletList <$> env "itemize" (many item))
+  , ("enumerate", orderedList <$> (optional opt *> env "enumerate" (many item)))
+  , ("code", failUnlessLHS *>
+      (codeBlockWith ("",["literate","haskell"],[]) <$> verbEnv "code"))
+  , ("verbatim", codeBlock <$> (verbEnv "verbatim"))
+  , ("Verbatim", codeBlock <$> (verbEnv "Verbatim"))
+  , ("lstlisting", codeBlock <$> (verbEnv "listlisting"))
   -- TODO fix behavior of math environments
   -- eg. align should be displaymath with aligned/gather
   , ("displaymath", mathEnv "displaymath")
@@ -388,14 +406,19 @@ environments = M.fromList
   ]
 
 item :: LP Blocks
-item = spaces *> controlSeq "item" *> blocks
+item = blocks *> controlSeq "item" *> optional opt *> blocks
+
+env :: String -> LP a -> LP a
+env name p = p <* (controlSeq "end" *> braced >>= guard . (== name))
 
 mathEnv :: String -> LP Blocks
 mathEnv name = para  <$> mathDisplay (verbEnv name)
 
 verbEnv :: String -> LP String
 verbEnv name = do
-  let endEnv = controlSeq "end" *> string ("{" ++ name ++ "}")
+  optional opt
+  optional blankline
+  let endEnv = try $ controlSeq "end" *> braced >>= guard . (== name)
   manyTill anyChar endEnv
 
 paragraph :: LP Blocks
@@ -594,12 +617,6 @@ codeBlockWith env = try $ do
   spaces
   let classes = if env == "code" then ["haskell"] else []
   return $ CodeBlock ("",classes,[]) (stripTrailingNewlines contents)
-
-lhsCodeBlock :: GenParser Char ParserState Block
-lhsCodeBlock = do
-  failUnlessLHS
-  (CodeBlock (_,_,_) cont) <- codeBlockWith "code"
-  return $ CodeBlock ("", ["sourceCode","literate","haskell"], []) cont
 
 listItem :: GenParser Char ParserState ([Inline], [Block])
 listItem = try $ do
