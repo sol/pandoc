@@ -150,7 +150,7 @@ inline = (mempty <$ comment)
      <|> (subscript <$> (char '_' *> tok))
      <|> (failUnlessLHS *> char '|' *> doLHSverb)
      <|> (str <$> count 1 tildeEscape)
-     <|> (str <$> count 1 (satisfy (\c -> c /= '\\' && c /='\n' && c /='}'))) -- TODO
+     <|> (str <$> count 1 (satisfy (\c -> c /= '\\' && c /='\n' && c /='}' && c /='{'))) -- TODO
 
 inlines :: LP Inlines
 inlines = mconcat <$> many (notFollowedBy (char '}') *> inline)
